@@ -15,6 +15,9 @@ including the spot where you stopped watching.
   auto-play of the next video.
 - **Remembers your place** per video, across devices.
 - Search, sort, rename, download and delete (delete moves the file to the Drive bin).
+- **Share one video by link.** The Share button makes that single file viewable by anyone
+  with the link (no sign-in), and nothing else in the library or the Drive. Stop sharing
+  switches the link off again.
 
 ## How it works
 

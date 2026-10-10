@@ -4,7 +4,7 @@ import { CLIENT_ID, SCOPE, FOLDER_NAME } from './config.js';
 
 const API = 'https://www.googleapis.com/drive/v3';
 const UPLOAD = 'https://www.googleapis.com/upload/drive/v3/files';
-const FILE_FIELDS = 'id,name,size,mimeType,createdTime,thumbnailLink,videoMediaMetadata(durationMillis,width,height),appProperties';
+const FILE_FIELDS = 'id,name,size,mimeType,createdTime,thumbnailLink,permissionIds,videoMediaMetadata(durationMillis,width,height),appProperties';
 const CHUNK = 16 * 1024 * 1024; // must be a multiple of 256 KB
 
 const K_TOKEN = 'reelbox.token';
@@ -150,6 +150,10 @@ export const getVideo = id => api(`/files/${id}`, { params: { fields: FILE_FIELD
 export const renameVideo = (id, name) => api(`/files/${id}`, { method: 'PATCH', params: { fields: FILE_FIELDS }, body: { name } });
 // Moves to the Drive bin rather than deleting outright, so a mistake can be undone for 30 days.
 export const removeVideo = id => api(`/files/${id}`, { method: 'PATCH', params: { fields: 'id' }, body: { trashed: true } });
+// "Anyone with the link" covers this one file only; nothing else in the Drive is exposed.
+export const shareVideo = id => api(`/files/${id}/permissions`, { method: 'POST', params: { fields: 'id' }, body: { role: 'reader', type: 'anyone' } });
+export const unshareVideo = id => api(`/files/${id}/permissions/anyoneWithLink`, { method: 'DELETE' });
+export const isShared = file => !!file.permissionIds?.includes('anyoneWithLink');
 export const savePosition = (id, seconds) =>
   api(`/files/${id}`, { method: 'PATCH', params: { fields: 'id' }, body: { appProperties: { pos: String(Math.floor(seconds)) } }, keepalive: true });
 

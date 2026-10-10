@@ -76,6 +76,13 @@
     </div>
   </section>
 
+  <!-- Shared link: one video, no sign-in, nothing else reachable -->
+  <section class="shared" id="view-shared" hidden>
+    <div class="stage"><iframe id="shared-frame" title="Shared video" allow="autoplay; fullscreen" allowfullscreen referrerpolicy="no-referrer"></iframe></div>
+    <p class="meta">Someone shared this video with you through Reelbox. This link opens this one video only. If it says you need access, the owner has stopped sharing it.</p>
+    <a class="btn" href="#/">Keep your own videos in Reelbox</a>
+  </section>
+
   <!-- Player -->
   <section class="watch" id="view-watch" hidden>
     <div class="watch-main">
@@ -92,6 +99,7 @@
               <option>0.5</option><option>0.75</option><option selected>1</option><option>1.25</option><option>1.5</option><option>1.75</option><option>2</option>
             </select>
           </label>
+          <button class="btn" id="share-btn">Share</button>
           <button class="btn" id="rename-btn">Rename</button>
           <a class="btn" id="download-btn">Download</a>
           <a class="btn" id="open-drive" target="_blank" rel="noopener">Open in Drive</a>
@@ -121,6 +129,7 @@
     <p id="dialog-text"></p>
     <input id="dialog-input" type="text" autocomplete="off" hidden>
     <div class="dialog-actions">
+      <button class="btn danger" id="dialog-extra" value="extra" hidden></button>
       <button class="btn" value="cancel">Cancel</button>
       <button class="btn primary" id="dialog-ok" value="ok"></button>
     </div>

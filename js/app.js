@@ -24,7 +24,7 @@ function toast(msg) {
   toastTimer = setTimeout(() => { t.hidden = true; }, 4500);
 }
 
-function ask({ title, text = '', ok, input, danger }) {
+function ask({ title, text = '', ok, input, danger, extra, readOnly }) {
   const d = $('dialog');
   $('dialog-title').textContent = title;
   $('dialog-text').textContent = text;
@@ -34,10 +34,13 @@ function ask({ title, text = '', ok, input, danger }) {
   const field = $('dialog-input');
   field.hidden = input === undefined;
   field.value = input ?? '';
+  field.readOnly = !!readOnly;
+  $('dialog-extra').hidden = !extra;
+  $('dialog-extra').textContent = extra || '';
   d.returnValue = 'cancel';
   d.showModal();
   if (input !== undefined) field.select();
-  return new Promise(resolve => d.addEventListener('close', () => resolve(d.returnValue === 'ok' ? (input === undefined ? true : field.value.trim()) : null), { once: true }));
+  return new Promise(resolve => d.addEventListener('close', () => resolve(d.returnValue === 'ok' ? (input === undefined ? true : field.value.trim()) : d.returnValue === 'extra' ? 'extra' : null), { once: true }));
 }
 
 function showNotice(text, button) {
@@ -174,6 +177,7 @@ async function openPlayer(f, resumeAt) {
   $('watch-title').textContent = titleOf(f);
   const m = f.videoMediaMetadata;
   $('watch-meta').textContent = [fmtDate(f.createdTime), fmtSize(f.size), m?.height ? `${m.width}×${m.height}` : '', f.name].filter(Boolean).join(' · ');
+  paintShare(f);
   $('open-drive').href = `https://drive.google.com/file/d/${f.id}/view`;
   const dl = $('download-btn');
   dl.hidden = !state.canStream;
@@ -254,6 +258,34 @@ document.addEventListener('keydown', e => {
 });
 
 $('speed').addEventListener('change', e => { video.playbackRate = Number(e.target.value); });
+
+const shareLink = f => `${location.origin}${location.pathname}#/v/${f.id}`;
+function paintShare(f) {
+  const on = drive.isShared(f);
+  $('share-btn').textContent = on ? 'Shared · link' : 'Share';
+  $('share-btn').classList.toggle('on', on);
+}
+
+$('share-btn').addEventListener('click', async () => {
+  const f = state.current;
+  try {
+    if (!drive.isShared(f)) {
+      if (!await ask({ title: 'Share this video?', text: `Anyone who has the link will be able to watch “${titleOf(f)}” without signing in. They get this one video only: not your other videos, and nothing else in your Drive. You can stop sharing at any time.`, ok: 'Create link' })) return;
+      await drive.shareVideo(f.id);
+      f.permissionIds = [...(f.permissionIds || []), 'anyoneWithLink'];
+      paintShare(f);
+    }
+    const choice = await ask({ title: 'Anyone with this link can watch', text: 'It opens this one video and nothing else.', input: shareLink(f), readOnly: true, ok: 'Copy link', extra: 'Stop sharing' });
+    if (choice === 'extra') {
+      await drive.unshareVideo(f.id);
+      f.permissionIds = f.permissionIds.filter(p => p !== 'anyoneWithLink');
+      paintShare(f);
+      toast('Sharing stopped. The link no longer works.');
+    } else if (choice) {
+      await navigator.clipboard.writeText(shareLink(f)).then(() => toast('Link copied.'), () => toast('Copy the link from the box.'));
+    }
+  } catch (err) { handleError(err); }
+});
 
 $('rename-btn').addEventListener('click', async () => {
   const f = state.current;
@@ -361,10 +393,21 @@ window.addEventListener('pagehide', () => rememberPosition(true));
 
 // ---------- routing & sign-in ----------
 function show(view) {
-  for (const id of ['view-welcome', 'view-library', 'view-watch']) $(id).hidden = id !== view;
+  for (const id of ['view-welcome', 'view-library', 'view-watch', 'view-shared']) $(id).hidden = id !== view;
+  if (view !== 'view-shared') $('shared-frame').removeAttribute('src');
 }
 
 async function route() {
+  // A shared link works for anyone, signed in or not. Drive's own player enforces the access.
+  const sharedId = /^#\/v\/([\w-]+)/.exec(location.hash)?.[1];
+  if (sharedId) {
+    closePlayer();
+    document.querySelectorAll('[data-signed-in]').forEach(el => { el.hidden = true; });
+    $('notice').hidden = true;
+    const src = `https://drive.google.com/file/d/${sharedId}/preview`;
+    if ($('shared-frame').getAttribute('src') !== src) $('shared-frame').src = src;
+    return show('view-shared');
+  }
   const known = drive.isSignedIn() || state.loaded; // keep the library on screen while reconnecting
   document.querySelectorAll('[data-signed-in]').forEach(el => { el.hidden = !known; });
   if (!known) { closePlayer(); return show('view-welcome'); }
