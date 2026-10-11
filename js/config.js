@@ -18,7 +18,7 @@ export const FOLDER_NAME = 'Reelbox';
 export const API_KEY = '';
 // Google Cloud project number; the Drive file picker needs it.
 export const APP_ID = '661147755281';
-export const FOLDER_ID = '';
+export const FOLDER_ID = '1TrZUldml5bAW4m-xXomH_dg92oAw9or4';
 
 // The hidden manage page (/sign-in) asks for a password. Only a salted hash is kept here.
 // The password hides the page; what actually stops anyone else changing the gallery is the
