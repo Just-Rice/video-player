@@ -18,7 +18,7 @@
   </a>
   <label class="search" id="search-box" hidden>
     <svg viewBox="0 0 20 20" width="16" height="16" aria-hidden="true"><circle cx="9" cy="9" r="6" fill="none" stroke="currentColor" stroke-width="2"/><path d="m14 14 4 4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
-    <input id="search" type="search" placeholder="Search videos" autocomplete="off">
+    <input id="search" type="search" placeholder="Search titles, descriptions, categories" autocomplete="off">
   </label>
   <div class="bar-right">
     <a class="btn ghost" id="manage-link" href="#/admin" hidden>Manage</a>
@@ -74,6 +74,8 @@
 
   <!-- Library -->
   <section id="view-library" hidden>
+    <div class="hero" id="hero" hidden></div>
+    <div id="rows"></div>
     <div class="lib-head">
       <h2 id="lib-title">Videos</h2>
       <select id="sort" aria-label="Sort">
@@ -102,6 +104,11 @@
         <div class="spinner" id="spinner" hidden></div>
         <button class="big-play" id="big-play" aria-label="Play"><svg viewBox="0 0 24 24" width="34" height="34"><path d="M8 5v14l11-7z" fill="currentColor"/></svg></button>
         <div class="stage-msg" id="stage-msg" hidden></div>
+        <div class="next-card" id="next-card" hidden>
+          <span>Up next in <b id="next-count">5</b></span>
+          <strong id="next-title"></strong>
+          <div><button class="btn primary small" id="next-now">Play now</button><button class="btn small" id="next-cancel">Cancel</button></div>
+        </div>
 
         <div class="pmenu" id="pmenu" hidden></div>
 
@@ -142,6 +149,7 @@
         <p class="meta" id="watch-meta"></p>
         <p class="desc" id="watch-desc" hidden></p>
         <div class="actions">
+          <button class="btn" id="list-btn">+ My List</button>
           <button class="btn" id="copy-btn">Copy link</button>
           <a class="btn" id="download-btn" target="_blank" rel="noopener">Download</a>
           <button class="btn" id="rename-btn" data-owner hidden>Edit details</button>
@@ -182,6 +190,9 @@
   <h3>Video details</h3>
   <label>Title<input id="e-title" type="text" autocomplete="off"></label>
   <label>Description<textarea id="e-desc" rows="3"></textarea></label>
+  <label>Category<input id="e-cat" type="text" list="e-cats" autocomplete="off" placeholder="e.g. Travel, Family, Music"></label>
+  <datalist id="e-cats"></datalist>
+  <label class="check"><input id="e-feat" type="checkbox"> Feature this video at the top of the home page</label>
   <div class="e-thumb">
     <div class="thumb"><img id="e-thumb-img" alt=""></div>
     <div>

@@ -117,7 +117,7 @@ function paintThumb(img, f) {
 // ---------- library ----------
 function visibleFiles() {
   const q = state.query.toLowerCase();
-  const list = state.files.filter(f => !q || `${f.title} ${f.description || ''}`.toLowerCase().includes(q));
+  const list = state.files.filter(f => !q || `${f.title} ${f.description || ''} ${f.category || ''}`.toLowerCase().includes(q));
   const by = {
     recent: (a, b) => b.added.localeCompare(a.added),
     oldest: (a, b) => a.added.localeCompare(b.added),
@@ -139,24 +139,78 @@ function card(f, compact) {
       ${dur ? `<span class="dur">${fmtTime(dur)}</span>` : ''}
       ${pct ? `<span class="seen"><i style="width:${pct}%"></i></span>` : ''}
     </div>
-    <div class="card-text"><strong>${esc(titleOf(f))}</strong><span>${fmtDate(f.added)}</span></div>`;
+    <div class="card-text"><strong>${esc(titleOf(f))}</strong><span>${f.category ? `${esc(f.category)} · ` : ''}${fmtDate(f.added)}</span></div>`;
   paintThumb(a.querySelector('img'), f);
   return a;
 }
 
+// "My List" is kept on each viewer's own device.
+const inList = id => store.get('list', []).includes(id);
+function toggleList(id) {
+  const list = store.get('list', []);
+  store.set('list', list.includes(id) ? list.filter(x => x !== id) : [id, ...list]);
+  toast(inList(id) ? 'Added to My List.' : 'Removed from My List.');
+}
+const listLabel = id => (inList(id) ? '✓ My List' : '+ My List');
+
+// One sideways-scrolling shelf of videos.
+function row(title, list) {
+  const sec = document.createElement('section');
+  sec.className = 'row';
+  sec.innerHTML = `<h3>${esc(title)}</h3><button class="row-nav prev" aria-label="Scroll back">‹</button><div class="row-scroll"></div><button class="row-nav next" aria-label="Scroll forward">›</button>`;
+  const scroller = sec.querySelector('.row-scroll');
+  scroller.append(...list.map(f => card(f)));
+  sec.querySelector('.prev').addEventListener('click', () => scroller.scrollBy({ left: -scroller.clientWidth * 0.85, behavior: 'smooth' }));
+  sec.querySelector('.next').addEventListener('click', () => scroller.scrollBy({ left: scroller.clientWidth * 0.85, behavior: 'smooth' }));
+  return sec;
+}
+
+function renderHero(f) {
+  const hero = $('hero');
+  hero.hidden = !f;
+  if (!f) return;
+  hero.innerHTML = `<img alt="" referrerpolicy="no-referrer"><div class="hero-text">
+    ${f.category ? `<span class="tag">${esc(f.category)}</span>` : ''}
+    <h1>${esc(f.title)}</h1>
+    ${f.description ? `<p>${esc(f.description)}</p>` : ''}
+    <div class="actions"><a class="btn hero-play" href="#/watch/${f.id}">▶ Play</a><button class="btn hero-list">${listLabel(f.id)}</button></div></div>`;
+  paintThumb(hero.querySelector('img'), f);
+  hero.querySelector('.hero-list').addEventListener('click', e => { toggleList(f.id); e.currentTarget.textContent = listLabel(f.id); renderLibrary(); });
+}
+
 function renderLibrary() {
   const list = visibleFiles();
+  const searching = !!state.query;
+  const all = state.files;
+  const newest = [...all].sort((a, b) => b.added.localeCompare(a.added));
+
+  // Home: a featured video and shelves. Searching: just the matching videos.
+  renderHero(searching ? null : all.find(f => f.featured) || newest[0]);
+  const rows = [];
+  if (!searching && all.length) {
+    const pos = store.get('pos', {});
+    const resume = all.filter(f => pos[f.id] > 5);
+    const mine = store.get('list', []).map(id => all.find(f => f.id === id)).filter(Boolean);
+    if (resume.length) rows.push(row('Continue watching', resume));
+    if (mine.length) rows.push(row('My List', mine));
+    if (all.length > 1) rows.push(row('New', newest.slice(0, 12)));
+    const cats = [...new Set(all.map(f => f.category).filter(Boolean))].sort((a, b) => a.localeCompare(b));
+    for (const c of cats) rows.push(row(c, newest.filter(f => f.category === c)));
+  }
+  $('rows').replaceChildren(...rows);
+
   $('grid').replaceChildren(...list.map(f => card(f)));
   const none = (state.loaded && !list.length) || !!state.loadError;
   $('empty').hidden = !none;
   if (none) {
-    const searching = !!state.query && state.files.length;
-    $('empty-title').textContent = state.loadError ? "Couldn't load the videos" : searching ? 'Nothing matches' : 'No videos yet';
-    $('empty-text').textContent = state.loadError || (searching ? `No video has “${state.query}” in its name.`
+    const noMatch = searching && all.length;
+    $('empty-title').textContent = state.loadError ? "Couldn't load the videos" : noMatch ? 'Nothing matches' : 'No videos yet';
+    $('empty-text').textContent = state.loadError || (noMatch ? `Nothing matches “${state.query}”.`
       : isOwner() ? 'Drop video files anywhere on this page, or use the Upload button.' : 'Nothing has been added here yet.');
-    $('empty-upload').hidden = !!searching || !isOwner() || !!state.loadError;
+    $('empty-upload').hidden = !!noMatch || !isOwner() || !!state.loadError;
   }
-  $('lib-title').textContent = state.loaded ? `Videos${state.files.length ? ` (${state.files.length})` : ''}` : state.loadError ? 'Videos' : 'Loading videos…';
+  $('lib-title').textContent = !state.loaded ? (state.loadError ? 'Videos' : 'Loading videos…')
+    : searching ? `Results for “${state.query}” (${list.length})` : `All videos${all.length ? ` (${all.length})` : ''}`;
 }
 
 const saveGallery = () => drive.saveManifest(state.manifest);
@@ -223,6 +277,7 @@ $('drive-back').addEventListener('click', () => setDriveMode(false));
 
 function closePlayer() {
   if (!state.current) return;
+  cancelNext();
   rememberPosition(true);
   setDriveMode(false);
   closeMenu();
@@ -245,6 +300,7 @@ async function openPlayer(f, resumeAt) {
   dl.hidden = !drive.isPublic && !state.canStream;
   dl.href = drive.isPublic ? `https://drive.google.com/uc?export=download&id=${f.id}` : `${drive.mediaUrl(f)}&download=${encodeURIComponent(f.title)}`;
   $('copy-btn').hidden = !drive.isPublic;
+  $('list-btn').textContent = listLabel(f.id);
   $('upnext').replaceChildren(...visibleFiles().filter(x => x.id !== f.id).slice(0, 12).map(x => card(x, true)));
   $('c-next').hidden = !nextVideo();
   $('c-quality').textContent = qualityLabel();
@@ -288,7 +344,24 @@ function rememberPosition(force) {
 }
 
 const nextVideo = () => { const list = visibleFiles(); return list[list.findIndex(x => x.id === state.current?.id) + 1]; };
-const playNext = () => { const n = nextVideo(); if (n) location.hash = `#/watch/${n.id}`; };
+const playNext = () => { cancelNext(); const n = nextVideo(); if (n) location.hash = `#/watch/${n.id}`; };
+
+// When a video ends, the next one starts after a short countdown the viewer can cancel.
+let nextTimer;
+function cancelNext() { clearInterval(nextTimer); $('next-card').hidden = true; }
+function queueNext() {
+  const n = nextVideo();
+  if (!n) return;
+  let left = 5;
+  $('next-title').textContent = n.title;
+  $('next-count').textContent = left;
+  $('next-card').hidden = false;
+  stage.classList.remove('idle');
+  clearInterval(nextTimer);
+  nextTimer = setInterval(() => { if (--left <= 0) playNext(); else $('next-count').textContent = left; }, 1000);
+}
+$('next-now').addEventListener('click', playNext);
+$('next-cancel').addEventListener('click', cancelNext);
 
 // ---------- player: subtitles ----------
 const srtToVtt = text => `WEBVTT\n\n${text.replace(/^\uFEFF/, '').replace(/\r/g, '').replace(/(\d\d:\d\d:\d\d),(\d{3})/g, '$1.$2')}`;
@@ -514,7 +587,8 @@ video.addEventListener('volumechange', () => { store.set('volume', video.volume)
 video.addEventListener('waiting', () => { $('spinner').hidden = false; });
 ['playing', 'canplay', 'seeked', 'pause', 'error', 'emptied'].forEach(ev => video.addEventListener(ev, () => { $('spinner').hidden = true; }));
 video.addEventListener('playing', () => stageMsg(''));
-video.addEventListener('ended', () => { rememberPosition(true); if (!video.loop) playNext(); });
+video.addEventListener('ended', () => { rememberPosition(true); if (!video.loop) queueNext(); });
+video.addEventListener('play', cancelNext);
 video.addEventListener('error', () => {
   if (!state.current || !video.getAttribute('src')) return;
   stageMsg(!drive.isPublic && !drive.isSignedIn() ? 'Sign in again to keep watching.'
@@ -544,6 +618,7 @@ document.addEventListener('keydown', e => {
 });
 
 // ---------- video actions ----------
+$('list-btn').addEventListener('click', e => { toggleList(state.current.id); e.currentTarget.textContent = listLabel(state.current.id); });
 $('copy-btn').addEventListener('click', () => {
   const link = `${location.origin}${location.pathname}#/watch/${state.current.id}`;
   navigator.clipboard.writeText(link).then(() => toast('Link copied. Anyone can watch with it.'), () => toast(link));
@@ -576,6 +651,9 @@ function openEdit(f) {
   editing = f; newThumb = undefined;
   $('e-title').value = f.title;
   $('e-desc').value = f.description || '';
+  $('e-cat').value = f.category || '';
+  $('e-feat').checked = !!f.featured;
+  $('e-cats').innerHTML = [...new Set(state.files.map(x => x.category).filter(Boolean))].map(c => `<option value="${esc(c)}">`).join('');
   paintThumb($('e-thumb-img'), f);
   renderEditSubs();
   $('edit').showModal();
@@ -602,6 +680,9 @@ $('e-save').addEventListener('click', async () => {
   try {
     f.title = $('e-title').value.trim() || f.title;
     f.description = $('e-desc').value.trim();
+    f.category = $('e-cat').value.trim();
+    if ($('e-feat').checked) state.files.forEach(x => { x.featured = false; }); // one featured video at a time
+    f.featured = $('e-feat').checked;
     if (newThumb !== undefined) {
       const old = f.thumb;
       f.thumb = newThumb ? (await drive.uploadFile(newThumb, { name: `thumb-${f.id}.jpg`, type: 'image/jpeg' })).id : '';
@@ -773,7 +854,7 @@ async function renderAdmin() {
     const row = document.createElement('div');
     row.className = 'admin-row';
     row.innerHTML = `<a class="thumb" href="#/watch/${f.id}"><img alt="" loading="lazy" referrerpolicy="no-referrer"></a>
-      <div class="card-text"><strong>${esc(f.title)}</strong><span>${fmtDate(f.added)} · ${fmtSize(f.size)}${f.subs?.length ? ` · ${f.subs.length} subtitle${f.subs.length > 1 ? 's' : ''}` : ''}${f.own ? '' : ' · from your Drive'}</span>
+      <div class="card-text"><strong>${esc(f.title)}</strong><span>${fmtDate(f.added)} · ${fmtSize(f.size)}${f.subs?.length ? ` · ${f.subs.length} subtitle${f.subs.length > 1 ? 's' : ''}` : ''}${f.own ? '' : ' · from your Drive'}${f.category ? ` · ${esc(f.category)}` : ''}${f.featured ? ' · featured' : ''}</span>
       <span>${esc(f.description || 'No description')}</span></div>
       <div class="actions"><button class="btn small">Edit</button><button class="btn small danger">Remove</button></div>`;
     paintThumb(row.querySelector('img'), f);
@@ -848,7 +929,7 @@ document.addEventListener('click', e => {
   if (!menu.hidden && !e.target.closest('#pmenu, .ctl, #video')) closeMenu();
 });
 
-$('search').addEventListener('input', e => { state.query = e.target.value.trim(); if (state.current) location.hash = '#/'; else renderLibrary(); });
+$('search').addEventListener('input', e => { state.query = e.target.value.trim(); if (state.current || location.hash.startsWith('#/admin')) location.hash = '#/'; else renderLibrary(); window.scrollTo(0, 0); });
 $('sort').addEventListener('change', e => { state.sort = e.target.value; renderLibrary(); });
 window.addEventListener('hashchange', route);
 

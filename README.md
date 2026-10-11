@@ -6,10 +6,14 @@ Live at **https://just-rice.github.io/video-player/**
 
 ## What it does
 
-- **Home page:** every video with its name and picture. Anyone can watch, no sign-in.
+- **Home page:** a featured video across the top, then shelves: Continue watching, My List,
+  New, and one per category, with every video's name and picture. A search bar looks through
+  titles, descriptions and categories. Anyone can watch, no sign-in. Continue watching and
+  My List are remembered per device.
+- **Up next:** when a video ends, the next one starts after a five-second countdown.
 - **Hidden manage page** at `/sign-in`: asks for the owner password, then the owner's Google
   sign-in. From there the owner can upload videos, add videos that are already in their
-  Google Drive, and set each one's title, description, thumbnail and subtitles, or remove it.
+  Google Drive, and set each one's title, description, category, thumbnail and subtitles, feature it, or remove it.
 - **Player:** seek bar with buffering and hover time, play/pause, ±10 s, next video, volume and
   mute, speed (0.25× to 2×), loop, subtitles, quality, picture in picture, full screen,
   keyboard shortcuts, and it remembers volume, speed and where you stopped on each device.
