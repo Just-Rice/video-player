@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Reelbox — your videos, saved to your Google Drive</title>
-<meta name="description" content="Upload videos, keep them in your own Google Drive, and watch them on any device.">
+<title>Reelbox</title>
+<meta name="description" content="A video gallery with a full player: speed, subtitles, quality, picture-in-picture and keyboard shortcuts.">
 <meta name="theme-color" content="#0E0F13">
 <link rel="icon" href="img/icon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="css/styles.css">
@@ -16,50 +16,46 @@
     <svg viewBox="0 0 32 32" width="28" height="28" aria-hidden="true"><rect width="32" height="32" rx="8" fill="#E5384F"/><path d="M12.5 9.8v12.4a1 1 0 0 0 1.5.9l10.4-6.2a1 1 0 0 0 0-1.8L14 8.9a1 1 0 0 0-1.5.9z" fill="#fff"/></svg>
     <span>Reelbox</span>
   </a>
-  <label class="search" data-signed-in hidden>
+  <label class="search" id="search-box" hidden>
     <svg viewBox="0 0 20 20" width="16" height="16" aria-hidden="true"><circle cx="9" cy="9" r="6" fill="none" stroke="currentColor" stroke-width="2"/><path d="m14 14 4 4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
-    <input id="search" type="search" placeholder="Search your videos" autocomplete="off">
+    <input id="search" type="search" placeholder="Search videos" autocomplete="off">
   </label>
-  <div class="bar-right" data-signed-in hidden>
-    <button class="btn primary" id="upload-btn">
+  <div class="bar-right">
+    <button class="btn ghost" id="owner-btn" hidden>Owner sign-in</button>
+    <button class="btn primary" id="upload-btn" data-owner hidden>
       <svg viewBox="0 0 20 20" width="16" height="16" aria-hidden="true"><path d="M10 14V4m0 0L6 8m4-4 4 4M4 16h12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
       <span>Upload</span>
     </button>
-    <div class="account">
+    <div class="account" data-owner hidden>
       <button class="avatar" id="account-btn" aria-haspopup="true" aria-expanded="false" aria-label="Account"></button>
       <div class="menu" id="account-menu" hidden>
         <div class="menu-who"><strong id="acct-name"></strong><span id="acct-email"></span></div>
         <div class="quota"><div class="quota-bar"><i id="quota-fill"></i></div><span id="quota-text"></span></div>
-        <a class="menu-item" id="drive-link" href="https://drive.google.com/drive/my-drive" target="_blank" rel="noopener">Open Google Drive</a>
+        <a class="menu-item" href="https://drive.google.com/drive/my-drive" target="_blank" rel="noopener">Open Google Drive</a>
         <button class="menu-item" id="signout-btn">Sign out</button>
       </div>
     </div>
   </div>
 </header>
 
-<div class="notice" id="notice" hidden><span id="notice-text"></span><button class="btn small" id="notice-btn">Reconnect</button></div>
+<div class="notice" id="notice" hidden><span id="notice-text"></span><button class="btn small" id="notice-btn"></button></div>
 
 <main>
-  <!-- Signed out -->
+  <!-- Shown only until the gallery has been set up -->
   <section class="welcome" id="view-welcome" hidden>
-    <h1>Your videos, kept in <em>your</em> Google Drive.</h1>
-    <p>Upload video files once and watch them from any device. Reelbox saves them to a folder in your own Drive and can only see the videos you add here, nothing else.</p>
+    <h1>This gallery is <em>being set up</em>.</h1>
+    <p>Once the owner has finished, every video they upload will be watchable here by anyone, with no sign-in. If this is your gallery, sign in to add videos.</p>
     <button class="btn google" id="signin-btn">
-      <svg viewBox="0 0 48 48" width="20" height="20" aria-hidden="true"><path fill="#EA4335" d="M24 9.5c3.5 0 6.6 1.2 9.1 3.6l6.8-6.8C35.8 2.4 30.3 0 24 0 14.6 0 6.5 5.4 2.6 13.2l7.9 6.2C12.4 13.6 17.7 9.5 24 9.5z"/><path fill="#4285F4" d="M46.5 24.5c0-1.6-.1-3.1-.4-4.5H24v9h12.7c-.6 3-2.3 5.500-4.800 7.200l7.700 6c4.500-4.200 6.900-10.300 6.900-17.700z"/><path fill="#FBBC05" d="M10.500 28.600A14.500 14.500 0 0 1 9.500 24c0-1.600.3-3.200.8-4.600l-7.900-6.200A24 24 0 0 0 0 24c0 3.900.9 7.500 2.600 10.800l7.900-6.200z"/><path fill="#34A853" d="M24 48c6.500 0 11.900-2.100 15.900-5.800l-7.700-6c-2.200 1.500-5 2.300-8.200 2.300-6.300 0-11.600-4.200-13.500-9.900l-7.900 6.200C6.500 42.600 14.600 48 24 48z"/></svg>
-      Sign in with Google
+      <svg viewBox="0 0 48 48" width="20" height="20" aria-hidden="true"><path fill="#EA4335" d="M24 9.5c3.5 0 6.6 1.2 9.1 3.6l6.8-6.8C35.8 2.4 30.3 0 24 0 14.6 0 6.5 5.4 2.600 13.200l7.900 6.200C12.400 13.600 17.700 9.500 24 9.500z"/><path fill="#4285F4" d="M46.500 24.500c0-1.600-.1-3.100-.4-4.500H24v9h12.700c-.6 3-2.300 5.500-4.800 7.200l7.700 6c4.500-4.200 6.900-10.300 6.900-17.700z"/><path fill="#FBBC05" d="M10.500 28.600A14.500 14.500 0 0 1 9.500 24c0-1.600.3-3.200.8-4.600l-7.900-6.200A24 24 0 0 0 0 24c0 3.900.9 7.500 2.600 10.800l7.900-6.200z"/><path fill="#34A853" d="M24 48c6.500 0 11.900-2.100 15.900-5.800l-7.700-6c-2.200 1.500-5 2.300-8.200 2.300-6.300 0-11.600-4.200-13.500-9.900l-7.900 6.200C6.500 42.600 14.600 48 24 48z"/></svg>
+      Owner sign-in with Google
     </button>
     <p class="error" id="signin-error" role="alert" hidden></p>
-    <ul class="points">
-      <li><strong>Saved to your account</strong>Videos live in a “Reelbox” folder in your Drive, so they follow you everywhere.</li>
-      <li><strong>Big files welcome</strong>Uploads go in pieces and pick up where they left off if the connection drops.</li>
-      <li><strong>Picks up where you stopped</strong>Start on one device, finish on another.</li>
-    </ul>
   </section>
 
   <!-- Library -->
   <section id="view-library" hidden>
     <div class="lib-head">
-      <h2 id="lib-title">Your videos</h2>
+      <h2 id="lib-title">Videos</h2>
       <select id="sort" aria-label="Sort">
         <option value="recent">Newest first</option>
         <option value="oldest">Oldest first</option>
@@ -71,45 +67,71 @@
     <div class="empty" id="empty" hidden>
       <svg viewBox="0 0 64 64" width="56" height="56" aria-hidden="true"><rect x="6" y="14" width="52" height="36" rx="6" fill="none" stroke="currentColor" stroke-width="3"/><path d="M27 24v16l14-8z" fill="currentColor"/></svg>
       <h3 id="empty-title">No videos yet</h3>
-      <p id="empty-text">Drop video files anywhere on this page, or use the Upload button.</p>
-      <button class="btn primary" id="empty-upload">Choose videos</button>
+      <p id="empty-text"></p>
+      <button class="btn primary" id="empty-upload" hidden>Choose videos</button>
     </div>
-  </section>
-
-  <!-- Shared link: one video, no sign-in, nothing else reachable -->
-  <section class="shared" id="view-shared" hidden>
-    <div class="stage"><iframe id="shared-frame" title="Shared video" allow="autoplay; fullscreen" allowfullscreen referrerpolicy="no-referrer"></iframe></div>
-    <p class="meta">Someone shared this video with you through Reelbox. This link opens this one video only. If it says you need access, the owner has stopped sharing it.</p>
-    <a class="btn" href="#/">Keep your own videos in Reelbox</a>
   </section>
 
   <!-- Player -->
   <section class="watch" id="view-watch" hidden>
     <div class="watch-main">
-      <div class="stage">
-        <video id="video" controls playsinline preload="metadata"></video>
+      <div class="stage" id="stage" tabindex="-1">
+        <video id="video" playsinline preload="metadata"></video>
+        <iframe id="drive-frame" title="Google Drive player" allow="autoplay; fullscreen" allowfullscreen hidden></iframe>
+        <button class="pill" id="drive-back" hidden>← Back to the Reelbox player</button>
+        <div class="spinner" id="spinner" hidden></div>
+        <button class="big-play" id="big-play" aria-label="Play"><svg viewBox="0 0 24 24" width="34" height="34"><path d="M8 5v14l11-7z" fill="currentColor"/></svg></button>
         <div class="stage-msg" id="stage-msg" hidden></div>
+
+        <div class="pmenu" id="pmenu" hidden></div>
+
+        <div class="controls" id="controls">
+          <div class="seek-wrap">
+            <input class="seek" id="seek" type="range" min="0" max="0" step="0.1" value="0" aria-label="Seek">
+            <span class="seek-tip" id="seek-tip" hidden></span>
+          </div>
+          <div class="ctl-row">
+            <button class="ctl" id="c-play" aria-label="Play or pause" title="Play/pause (Space)">
+              <svg class="i-play" viewBox="0 0 24 24"><path d="M8 5v14l11-7z" fill="currentColor"/></svg>
+              <svg class="i-pause" viewBox="0 0 24 24"><path d="M7 5h4v14H7zm6 0h4v14h-4z" fill="currentColor"/></svg>
+            </button>
+            <button class="ctl" id="c-back" aria-label="Back 10 seconds" title="Back 10 s (J)"><svg viewBox="0 0 24 24"><path d="M12 5V2L7 6l5 4V7a6 6 0 1 1-6 6H4a8 8 0 1 0 8-8z" fill="currentColor"/><text x="12" y="16.500" font-size="7" font-weight="700" text-anchor="middle" fill="currentColor">10</text></svg></button>
+            <button class="ctl" id="c-fwd" aria-label="Forward 10 seconds" title="Forward 10 s (L)"><svg viewBox="0 0 24 24"><path d="M12 5V2l5 4-5 4V7a6 6 0 1 0 6 6h2a8 8 0 1 1-8-8z" fill="currentColor"/><text x="12" y="16.500" font-size="7" font-weight="700" text-anchor="middle" fill="currentColor">10</text></svg></button>
+            <button class="ctl" id="c-next" aria-label="Next video" title="Next video (Shift+N)"><svg viewBox="0 0 24 24"><path d="M6 5v14l9-7zm10 0h2v14h-2z" fill="currentColor"/></svg></button>
+            <button class="ctl" id="c-mute" aria-label="Mute" title="Mute (M)">
+              <svg class="i-vol" viewBox="0 0 24 24"><path d="M4 9v6h4l5 5V4L8 9zm12.500 3a4.500 4.500 0 0 0-2.500-4v8a4.500 4.500 0 0 0 2.500-4zM14 3.200v2.100a7 7 0 0 1 0 13.400v2.100a9 9 0 0 0 0-17.600z" fill="currentColor"/></svg>
+              <svg class="i-muted" viewBox="0 0 24 24"><path d="M4 9v6h4l5 5V4L8 9zm12.600 3 2.700-2.700-1.400-1.400-2.700 2.700-2.700-2.700v2.800l1.300 1.300-1.300 1.300v2.800l2.700-2.700 2.700 2.700 1.400-1.400z" fill="currentColor"/></svg>
+            </button>
+            <input class="vol" id="c-vol" type="range" min="0" max="1" step="0.05" value="1" aria-label="Volume">
+            <span class="time" id="c-time">0:00 / 0:00</span>
+            <span class="ctl-gap"></span>
+            <button class="ctl text" id="c-sub" aria-label="Subtitles" title="Subtitles (C)">CC</button>
+            <button class="ctl text" id="c-speed" aria-label="Playback speed" title="Speed (&lt; and &gt;)">1×</button>
+            <button class="ctl text" id="c-quality" aria-label="Quality" title="Quality">HD</button>
+            <button class="ctl" id="c-pip" aria-label="Picture in picture" title="Picture in picture (P)"><svg viewBox="0 0 24 24"><path d="M3 5h18v14H3zm2 2v10h14V7zm6 4h6v4h-6z" fill="currentColor"/></svg></button>
+            <button class="ctl" id="c-fs" aria-label="Full screen" title="Full screen (F)">
+              <svg class="i-fs" viewBox="0 0 24 24"><path d="M5 5h5v2H7v3H5zm9 0h5v5h-2V7h-3zM5 14h2v3h3v2H5zm12 0h2v5h-5v-2h3z" fill="currentColor"/></svg>
+              <svg class="i-fsx" viewBox="0 0 24 24"><path d="M8 5h2v5H5V8h3zm6 0h2v3h3v2h-5zM5 14h5v5H8v-3H5zm9 0h5v2h-3v3h-2z" fill="currentColor"/></svg>
+            </button>
+          </div>
+        </div>
       </div>
+
       <div class="watch-info">
         <h2 id="watch-title"></h2>
         <p class="meta" id="watch-meta"></p>
         <div class="actions">
-          <label class="speed">Speed
-            <select id="speed">
-              <option>0.5</option><option>0.75</option><option selected>1</option><option>1.25</option><option>1.5</option><option>1.75</option><option>2</option>
-            </select>
-          </label>
-          <button class="btn" id="share-btn">Share</button>
-          <button class="btn" id="rename-btn">Rename</button>
-          <a class="btn" id="download-btn">Download</a>
-          <a class="btn" id="open-drive" target="_blank" rel="noopener">Open in Drive</a>
-          <button class="btn danger" id="delete-btn">Delete</button>
+          <button class="btn" id="copy-btn">Copy link</button>
+          <a class="btn" id="download-btn" target="_blank" rel="noopener">Download</a>
+          <button class="btn" id="rename-btn" data-owner hidden>Rename</button>
+          <a class="btn" id="open-drive" target="_blank" rel="noopener" data-owner hidden>Open in Drive</a>
+          <button class="btn danger" id="delete-btn" data-owner hidden>Delete</button>
         </div>
-        <p class="keys">Shortcuts: <kbd>Space</kbd> play/pause · <kbd>←</kbd><kbd>→</kbd> 5 s · <kbd>J</kbd><kbd>L</kbd> 10 s · <kbd>F</kbd> full screen · <kbd>M</kbd> mute · <kbd>&lt;</kbd><kbd>&gt;</kbd> speed</p>
+        <p class="keys">Shortcuts: <kbd>Space</kbd> play/pause · <kbd>←</kbd><kbd>→</kbd> 5 s · <kbd>J</kbd><kbd>L</kbd> 10 s · <kbd>↑</kbd><kbd>↓</kbd> volume · <kbd>M</kbd> mute · <kbd>C</kbd> subtitles · <kbd>F</kbd> full screen · <kbd>P</kbd> picture in picture · <kbd>&lt;</kbd><kbd>&gt;</kbd> speed · <kbd>0</kbd>–<kbd>9</kbd> jump</p>
       </div>
     </div>
     <aside class="upnext">
-      <h3>More of your videos</h3>
+      <h3>More videos</h3>
       <div id="upnext"></div>
     </aside>
   </section>
@@ -129,7 +151,6 @@
     <p id="dialog-text"></p>
     <input id="dialog-input" type="text" autocomplete="off" hidden>
     <div class="dialog-actions">
-      <button class="btn danger" id="dialog-extra" value="extra" hidden></button>
       <button class="btn" value="cancel">Cancel</button>
       <button class="btn primary" id="dialog-ok" value="ok"></button>
     </div>
@@ -137,6 +158,7 @@
 </dialog>
 
 <input id="file-input" type="file" accept="video/*,.mkv,.avi,.mov,.m4v,.webm" multiple hidden>
+<input id="sub-input" type="file" accept=".vtt,.srt,text/vtt" hidden>
 <div class="toast" id="toast" role="status" hidden></div>
 
 <script type="module" src="js/app.js"></script>

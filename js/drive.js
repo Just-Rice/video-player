@@ -1,10 +1,12 @@
-// Everything that talks to Google: sign-in, and the Drive calls for listing, uploading,
-// renaming and removing videos.
-import { CLIENT_ID, SCOPE, FOLDER_NAME } from './config.js';
+// Everything that talks to Google: owner sign-in, and the Drive calls for listing, uploading,
+// renaming and removing videos. Visitors read the public folder with the API key; only the
+// signed-in owner can write.
+import { CLIENT_ID, SCOPE, FOLDER_NAME, API_KEY, FOLDER_ID } from './config.js';
 
 const API = 'https://www.googleapis.com/drive/v3';
 const UPLOAD = 'https://www.googleapis.com/upload/drive/v3/files';
-const FILE_FIELDS = 'id,name,size,mimeType,createdTime,thumbnailLink,permissionIds,videoMediaMetadata(durationMillis,width,height),appProperties';
+const FILE_FIELDS = 'id,name,size,mimeType,createdTime,thumbnailLink,videoMediaMetadata(durationMillis,width,height),appProperties';
+const FOLDER_TYPE = 'application/vnd.google-apps.folder';
 const CHUNK = 16 * 1024 * 1024; // must be a multiple of 256 KB
 
 const K_TOKEN = 'reelbox.token';
@@ -23,6 +25,8 @@ const listeners = new Set();
 export const onAuthChange = fn => listeners.add(fn);
 export const isSignedIn = () => !!token && token.expires_at > Date.now();
 export const isConfigured = () => !!CLIENT_ID;
+// True once the gallery can be read by anyone.
+export const isPublic = !!(API_KEY && FOLDER_ID);
 
 async function shareToken() {
   try {
@@ -33,13 +37,14 @@ async function shareToken() {
 }
 
 async function setToken(next) {
+  const changed = !!token !== !!next;
   token = next;
   try {
     if (next) localStorage.setItem(K_TOKEN, JSON.stringify(next));
     else localStorage.removeItem(K_TOKEN);
   } catch { /* private window */ }
   await shareToken();
-  listeners.forEach(fn => fn(isSignedIn()));
+  if (changed) listeners.forEach(fn => fn(isSignedIn()));
 }
 
 function loadGis() {
@@ -61,7 +66,6 @@ export async function initAuth() {
     if (saved && saved.expires_at > Date.now()) token = saved;
   } catch { /* ignore */ }
   await shareToken();
-  if (CLIENT_ID) loadGis().catch(() => {});
   return isSignedIn();
 }
 
@@ -92,6 +96,12 @@ export async function signIn() {
     try { hint = localStorage.getItem(K_HINT) || undefined; } catch { /* ignore */ }
     tokenClient.requestAccessToken({ prompt: '', hint });
   });
+  // Only the person who owns the gallery folder may sign in to a public gallery.
+  if (FOLDER_ID) {
+    const res = await fetch(`${API}/files/${FOLDER_ID}?fields=capabilities(canAddChildren)`, { headers: { Authorization: `Bearer ${next.access_token}` } });
+    const info = res.ok ? await res.json() : null;
+    if (!info?.capabilities?.canAddChildren) throw new AuthError('Only the owner of this gallery can sign in to upload.');
+  }
   await setToken(next);
 }
 
@@ -99,15 +109,15 @@ export async function signOut() {
   await setToken(null);
 }
 
-async function api(path, { method = 'GET', body, params, keepalive } = {}) {
-  if (!isSignedIn()) { await setToken(null); throw new AuthError('Signed out'); }
+// Reads work for anyone on a public gallery (API key). Everything else needs the owner's token.
+async function api(path, { method = 'GET', body, params } = {}) {
   const url = new URL(path.startsWith('http') ? path : API + path);
   Object.entries(params || {}).forEach(([k, v]) => url.searchParams.set(k, v));
-  const res = await fetch(url, {
-    method, keepalive,
-    headers: { Authorization: `Bearer ${token.access_token}`, ...(body ? { 'Content-Type': 'application/json' } : {}) },
-    body: body ? JSON.stringify(body) : undefined,
-  });
+  const headers = body ? { 'Content-Type': 'application/json' } : {};
+  if (isSignedIn()) headers.Authorization = `Bearer ${token.access_token}`;
+  else if (method === 'GET' && API_KEY) url.searchParams.set('key', API_KEY);
+  else { if (token) await setToken(null); throw new AuthError('Signed out'); }
+  const res = await fetch(url, { method, headers, body: body ? JSON.stringify(body) : undefined });
   if (res.status === 401) { await setToken(null); throw new AuthError('Session expired'); }
   if (!res.ok) {
     const detail = await res.json().catch(() => null);
@@ -122,23 +132,28 @@ export async function getAccount() {
   return about;
 }
 
-let folderId = null;
-async function getFolder() {
+// The owner's upload folder. Created on first use and opened to "anyone with the link" as a
+// viewer, which is what makes the gallery public. Nothing outside this folder is exposed.
+let folderId = FOLDER_ID || null;
+export async function getFolder() {
   if (folderId) return folderId;
-  const q = "mimeType='application/vnd.google-apps.folder' and trashed=false and appProperties has { key='reelbox' and value='root' }";
+  const q = `mimeType='${FOLDER_TYPE}' and trashed=false and appProperties has { key='reelbox' and value='root' }`;
   const found = await api('/files', { params: { q, fields: 'files(id)', pageSize: 1 } });
-  folderId = found.files[0]?.id
-    || (await api('/files', { method: 'POST', params: { fields: 'id' }, body: { name: FOLDER_NAME, mimeType: 'application/vnd.google-apps.folder', appProperties: { reelbox: 'root' } } })).id;
-  return folderId;
+  let id = found.files[0]?.id;
+  if (!id) id = (await api('/files', { method: 'POST', params: { fields: 'id' }, body: { name: FOLDER_NAME, mimeType: FOLDER_TYPE, appProperties: { reelbox: 'root' } } })).id;
+  await api(`/files/${id}/permissions`, { method: 'POST', params: { fields: 'id' }, body: { role: 'reader', type: 'anyone' } });
+  folderId = id;
+  return id;
 }
 
-export async function listVideos() {
+// Every file in the gallery: videos, plus the subtitle files that sit beside them.
+export async function listFiles() {
+  const q = FOLDER_ID ? `'${FOLDER_ID}' in parents and trashed=false` : `trashed=false and mimeType != '${FOLDER_TYPE}'`;
   const files = [];
   let pageToken;
   do {
     const page = await api('/files', { params: {
-      q: "trashed=false and mimeType contains 'video/'", fields: `nextPageToken,files(${FILE_FIELDS})`,
-      orderBy: 'createdTime desc', pageSize: 200, ...(pageToken ? { pageToken } : {}),
+      q, fields: `nextPageToken,files(${FILE_FIELDS})`, orderBy: 'createdTime desc', pageSize: 200, ...(pageToken ? { pageToken } : {}),
     } });
     files.push(...page.files);
     pageToken = page.nextPageToken;
@@ -146,23 +161,34 @@ export async function listVideos() {
   return files;
 }
 
-export const getVideo = id => api(`/files/${id}`, { params: { fields: FILE_FIELDS } });
 export const renameVideo = (id, name) => api(`/files/${id}`, { method: 'PATCH', params: { fields: FILE_FIELDS }, body: { name } });
 // Moves to the Drive bin rather than deleting outright, so a mistake can be undone for 30 days.
-export const removeVideo = id => api(`/files/${id}`, { method: 'PATCH', params: { fields: 'id' }, body: { trashed: true } });
-// "Anyone with the link" covers this one file only; nothing else in the Drive is exposed.
-export const shareVideo = id => api(`/files/${id}/permissions`, { method: 'POST', params: { fields: 'id' }, body: { role: 'reader', type: 'anyone' } });
-export const unshareVideo = id => api(`/files/${id}/permissions/anyoneWithLink`, { method: 'DELETE' });
-export const isShared = file => !!file.permissionIds?.includes('anyoneWithLink');
-export const savePosition = (id, seconds) =>
-  api(`/files/${id}`, { method: 'PATCH', params: { fields: 'id' }, body: { appProperties: { pos: String(Math.floor(seconds)) } }, keepalive: true });
+export const removeFile = id => api(`/files/${id}`, { method: 'PATCH', params: { fields: 'id' }, body: { trashed: true } });
+
+// Where the <video> tag loads from. Public files come straight from Google; before the gallery
+// is public, the owner's own files go through the service worker (./stream/<id>, see sw.js).
+export const mediaUrl = f => (isPublic
+  ? `${API}/files/${f.id}?alt=media&key=${API_KEY}`
+  : `stream/${f.id}?size=${f.size}&type=${encodeURIComponent(f.mimeType)}`);
+
+async function mediaFetch(id) {
+  const url = new URL(`${API}/files/${id}`);
+  url.searchParams.set('alt', 'media');
+  const headers = {};
+  if (isSignedIn()) headers.Authorization = `Bearer ${token.access_token}`;
+  else if (API_KEY) url.searchParams.set('key', API_KEY);
+  else throw new AuthError('Signed out');
+  const res = await fetch(url, { headers });
+  if (res.status === 401) { await setToken(null); throw new AuthError('Session expired'); }
+  if (!res.ok) throw new Error(`Couldn't load the file (${res.status}).`);
+  return res;
+}
+
+export const fetchText = async id => (await mediaFetch(id)).text();
 
 // Used when the service worker isn't available: pulls the whole file down before playing.
 export async function downloadBlob(id, onProgress) {
-  if (!isSignedIn()) throw new AuthError('Signed out');
-  const res = await fetch(`${API}/files/${id}?alt=media`, { headers: { Authorization: `Bearer ${token.access_token}` } });
-  if (res.status === 401) { await setToken(null); throw new AuthError('Session expired'); }
-  if (!res.ok) throw new Error(`Couldn't load the video (${res.status}).`);
+  const res = await mediaFetch(id);
   const total = Number(res.headers.get('Content-Length')) || 0;
   const reader = res.body.getReader();
   const parts = [];
@@ -174,6 +200,20 @@ export async function downloadBlob(id, onProgress) {
     if (total) onProgress?.(got / total);
   }
   return new Blob(parts, { type: res.headers.get('Content-Type') || 'video/mp4' });
+}
+
+// Small files (subtitles) go up in a single request.
+export async function uploadText(name, mimeType, text) {
+  if (!isSignedIn()) { if (token) await setToken(null); throw new AuthError('Session expired'); }
+  const parent = await getFolder();
+  const b = `reelbox${Date.now()}`;
+  const body = `--${b}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify({ name, mimeType, parents: [parent] })}\r\n--${b}\r\nContent-Type: ${mimeType}; charset=UTF-8\r\n\r\n${text}\r\n--${b}--`;
+  const res = await fetch(`${UPLOAD}?uploadType=multipart&fields=${encodeURIComponent(FILE_FIELDS)}`, {
+    method: 'POST', headers: { Authorization: `Bearer ${token.access_token}`, 'Content-Type': `multipart/related; boundary=${b}` }, body,
+  });
+  if (res.status === 401) { await setToken(null); throw new AuthError('Session expired'); }
+  if (!res.ok) throw new Error(`Couldn't save the subtitles (${res.status}).`);
+  return res.json();
 }
 
 const TYPES = { mp4: 'video/mp4', m4v: 'video/mp4', mov: 'video/quicktime', webm: 'video/webm', mkv: 'video/x-matroska', avi: 'video/x-msvideo', ogv: 'video/ogg', mpg: 'video/mpeg', mpeg: 'video/mpeg', '3gp': 'video/3gpp', ts: 'video/mp2t', wmv: 'video/x-ms-wmv', flv: 'video/x-flv' };
@@ -201,7 +241,7 @@ function receivedBytes(xhr, fallback) {
 
 // Uploads in pieces so a dropped connection resumes instead of starting over.
 export async function uploadVideo(file, { duration, onProgress, signal } = {}) {
-  if (!isSignedIn()) { await setToken(null); throw new AuthError('Session expired'); }
+  if (!isSignedIn()) { if (token) await setToken(null); throw new AuthError('Session expired'); }
   const type = videoType(file);
   const parent = await getFolder();
   const start = await fetch(`${UPLOAD}?uploadType=resumable&fields=${encodeURIComponent(FILE_FIELDS)}`, {
