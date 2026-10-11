@@ -13,6 +13,11 @@ Live at **https://just-rice.github.io/video-player/**
 - **Series:** give videos the same series name, with a season and episode number, and they
   become one card on the home page that opens an episode list by season. The player shows
   the episode list beside the video and plays the next episode automatically.
+- **Auto-fill from file names:** a new video (uploaded or added from Drive) gets its title,
+  and its series, season and episode when the name has them, read from the file name
+  (`js/names.js`). `Road.Trip.S01E02.Night.Market.1080p.mp4` arrives as Road Trip, season 1,
+  episode 2, "Night Market". An episode of a series already in the gallery takes that
+  series' category. Everything can still be changed in Edit.
 - **Up next:** when a video ends, the next one starts after a five-second countdown.
 - **Hidden manage page** at `/sign-in`: asks for the owner password, then the owner's Google
   sign-in. From there the owner can upload videos, add videos that are already in their
@@ -61,6 +66,13 @@ Until the key and folder ID are filled in, visitors see an empty gallery.
 
 The Google sign-in is in **Testing** mode, so only accounts listed under *Google Auth
 Platform → Audience → Test users* can sign in at all.
+
+## Tests
+
+```
+node tests/names.test.mjs                       # file-name reading
+node tests/run.mjs tests/autofill.browser.js    # in headless Chrome, with a stand-in for Drive
+```
 
 ## Running it locally
 

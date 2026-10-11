@@ -1,5 +1,6 @@
 // Screen logic: library, player, upload queue.
 import * as drive from './drive.js';
+import { guessDetails } from './names.js';
 import { ADMIN_SALT, ADMIN_HASH, API_KEY, FOLDER_ID } from './config.js';
 
 const $ = id => document.getElementById(id);
@@ -265,12 +266,22 @@ function renderLibrary() {
 
 const saveGallery = () => drive.saveManifest(state.manifest);
 
-// What the gallery remembers about one video.
-const entryFrom = (meta, extra = {}) => ({
-  id: meta.id, title: meta.name.replace(/\.[a-z0-9]{2,5}$/i, ''), description: '', mimeType: meta.mimeType, size: Number(meta.size) || 0,
-  duration: Number(meta.videoMediaMetadata?.durationMillis) / 1000 || 0, width: meta.videoMediaMetadata?.width || 0, height: meta.videoMediaMetadata?.height || 0,
-  added: new Date().toISOString(), thumb: '', subs: [], own: false, ...extra,
-});
+// What the gallery remembers about one video. Title, series, season and episode are read from
+// the file name; a new episode of a series already in the gallery joins it and takes its category.
+function entryFrom(meta, extra = {}) {
+  const guess = guessDetails(meta.name);
+  if (guess.series) {
+    const known = state.files.find(f => f.series?.toLowerCase() === guess.series.toLowerCase());
+    if (known) { guess.series = known.series; if (known.category) guess.category = known.category; }
+  }
+  return {
+    id: meta.id, description: '', mimeType: meta.mimeType, size: Number(meta.size) || 0,
+    duration: Number(meta.videoMediaMetadata?.durationMillis) / 1000 || 0, width: meta.videoMediaMetadata?.width || 0, height: meta.videoMediaMetadata?.height || 0,
+    added: new Date().toISOString(), thumb: '', subs: [], own: false, ...guess, ...extra,
+  };
+}
+// How a freshly added video was filled in, for the owner to check at a glance.
+const filledAs = f => (f.series ? `${f.series} ${epLabel(f)} · ${f.title}` : f.title);
 
 async function refresh() {
   try {
@@ -785,17 +796,19 @@ async function removeVideo(f) {
 async function addFromDrive() {
   try {
     const ids = await drive.pickVideos();
-    let added = 0;
+    const names = [];
     for (const id of ids) {
       if (state.files.some(f => f.id === id)) continue;
       const meta = await drive.getMeta(id);
       if (!meta.mimeType.startsWith('video/')) continue;
       await drive.makePublic(id);
-      state.files.unshift(entryFrom(meta));
-      added++;
+      const entry = entryFrom(meta);
+      state.files.unshift(entry);
+      names.push(filledAs(entry));
     }
+    const added = names.length;
     if (added) { await saveGallery(); route(); }
-    if (ids.length) toast(added ? `Added ${added} video${added > 1 ? 's' : ''}. Open Edit to set the title and thumbnail.` : 'Nothing new to add.');
+    if (ids.length) toast(added === 1 ? `Added as “${names[0]}”. Open Edit to change anything.` : added ? `Added ${added} videos, named from their files. Open Edit to change anything.` : 'Nothing new to add.');
   } catch (err) { handleError(err); }
 }
 
@@ -809,7 +822,7 @@ function renderQueue() {
     const li = document.createElement('li');
     li.className = u.status;
     const pct = u.file.size ? Math.round(u.sent / u.file.size * 100) : 0;
-    const line = { waiting: 'Waiting…', uploading: `${pct}% · ${fmtSize(u.sent)} of ${fmtSize(u.file.size)}`, done: 'Added to the gallery', error: u.error || 'Failed', cancelled: 'Cancelled' }[u.status];
+    const line = { waiting: 'Waiting…', uploading: `${pct}% · ${fmtSize(u.sent)} of ${fmtSize(u.file.size)}`, done: `Added as “${u.note || u.file.name}”`, error: u.error || 'Failed', cancelled: 'Cancelled' }[u.status];
     li.innerHTML = `<div class="q-row"><span class="q-name">${esc(u.file.name)}</span>
       ${u.status === 'waiting' || u.status === 'uploading' ? '<button class="q-x" aria-label="Cancel upload">×</button>' : u.status === 'error' ? '<button class="q-retry">Retry</button>' : ''}</div>
       <div class="q-bar"><i style="width:${u.status === 'done' ? 100 : pct}%"></i></div><span class="q-line">${esc(line)}</span>`;
@@ -845,7 +858,9 @@ async function pump() {
       });
       let thumb = '';
       if (frame.blob) thumb = (await drive.uploadFile(frame.blob, { name: `thumb-${saved.id}.jpg`, type: 'image/jpeg' }).catch(() => null))?.id || '';
-      state.files.unshift(entryFrom(saved, { own: true, thumb, duration: frame.duration || 0 }));
+      const entry = entryFrom(saved, { own: true, thumb, duration: frame.duration || 0 });
+      state.files.unshift(entry);
+      u.note = filledAs(entry);
       await saveGallery();
       u.status = 'done';
       if (!state.current) route();
