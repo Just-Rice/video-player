@@ -117,7 +117,7 @@ function paintThumb(img, f) {
 // ---------- library ----------
 function visibleFiles() {
   const q = state.query.toLowerCase();
-  const list = state.files.filter(f => !q || `${f.title} ${f.description || ''} ${f.category || ''}`.toLowerCase().includes(q));
+  const list = state.files.filter(f => !q || `${f.title} ${f.description || ''} ${f.category || ''} ${f.series || ''}`.toLowerCase().includes(q));
   const by = {
     recent: (a, b) => b.added.localeCompare(a.added),
     oldest: (a, b) => a.added.localeCompare(b.added),
@@ -127,7 +127,55 @@ function visibleFiles() {
   return list.sort(by[state.sort]);
 }
 
+// ---------- series ----------
+// Videos that share a series name are its episodes, ordered by season then episode number.
+const episodesOf = name => state.files.filter(f => f.series === name)
+  .sort((a, b) => (a.season || 1) - (b.season || 1) || (a.episode || 0) - (b.episode || 0) || a.added.localeCompare(b.added));
+const epLabel = f => (f.series ? `S${f.season || 1} E${f.episode || '?'}` : '');
+const seriesHref = name => `#/series/${encodeURIComponent(name)}`;
+// On the home page a series takes one card instead of one per episode.
+function collapse(list) {
+  const seen = new Set();
+  return list.flatMap(f => {
+    if (!f.series) return [f];
+    if (seen.has(f.series)) return [];
+    seen.add(f.series);
+    return [{ seriesName: f.series, episodes: episodesOf(f.series) }];
+  });
+}
+
+function seriesCard(item) {
+  const first = item.episodes[0];
+  const seasons = new Set(item.episodes.map(e => e.season || 1)).size;
+  const a = document.createElement('a');
+  a.className = 'card';
+  a.href = seriesHref(item.seriesName);
+  a.innerHTML = `
+    <div class="thumb stack"><img alt="" loading="lazy" referrerpolicy="no-referrer"><span class="dur">${item.episodes.length} episode${item.episodes.length > 1 ? 's' : ''}</span></div>
+    <div class="card-text"><strong>${esc(item.seriesName)}</strong><span>Series${seasons > 1 ? ` · ${seasons} seasons` : ''}${first.category ? ` · ${esc(first.category)}` : ''}</span></div>`;
+  paintThumb(a.querySelector('img'), first);
+  return a;
+}
+
+function renderSeries(name) {
+  const eps = episodesOf(name);
+  const pos = store.get('pos', {});
+  const resume = eps.find(e => pos[e.id] > 5) || eps[0];
+  const seasons = [...new Set(eps.map(e => e.season || 1))];
+  $('series-title').textContent = name;
+  $('series-meta').textContent = `${seasons.length > 1 ? `${seasons.length} seasons · ` : ''}${eps.length} episode${eps.length > 1 ? 's' : ''}`;
+  $('series-play').href = `#/watch/${resume.id}`;
+  $('series-play').textContent = pos[resume.id] > 5 ? `▶ Continue ${epLabel(resume)}` : '▶ Play';
+  $('series-list').replaceChildren(...seasons.map(n => {
+    const sec = document.createElement('section');
+    sec.innerHTML = seasons.length > 1 ? `<h3>Season ${n}</h3>` : '';
+    sec.append(...eps.filter(e => (e.season || 1) === n).map(e => card(e, true)));
+    return sec;
+  }));
+}
+
 function card(f, compact) {
+  if (f.seriesName) return seriesCard(f);
   const dur = durationOf(f);
   const pos = store.get('pos', {})[f.id] || 0;
   const pct = dur && pos > 5 ? Math.min(100, pos / dur * 100) : 0;
@@ -139,7 +187,7 @@ function card(f, compact) {
       ${dur ? `<span class="dur">${fmtTime(dur)}</span>` : ''}
       ${pct ? `<span class="seen"><i style="width:${pct}%"></i></span>` : ''}
     </div>
-    <div class="card-text"><strong>${esc(titleOf(f))}</strong><span>${f.category ? `${esc(f.category)} · ` : ''}${fmtDate(f.added)}</span></div>`;
+    <div class="card-text"><strong>${f.series && compact ? `${f.episode || '?'}. ` : ''}${esc(titleOf(f))}</strong><span>${f.series && !compact ? `${esc(f.series)} ${epLabel(f)} · ` : ''}${f.category && !f.series ? `${esc(f.category)} · ` : ''}${compact && f.description ? esc(f.description) : fmtDate(f.added)}</span></div>`;
   paintThumb(a.querySelector('img'), f);
   return a;
 }
@@ -193,13 +241,15 @@ function renderLibrary() {
     const mine = store.get('list', []).map(id => all.find(f => f.id === id)).filter(Boolean);
     if (resume.length) rows.push(row('Continue watching', resume));
     if (mine.length) rows.push(row('My List', mine));
-    if (all.length > 1) rows.push(row('New', newest.slice(0, 12)));
+    if (all.length > 1) rows.push(row('New', collapse(newest).slice(0, 12)));
+    const shows = collapse(newest).filter(x => x.seriesName);
+    if (shows.length) rows.push(row('Series', shows));
     const cats = [...new Set(all.map(f => f.category).filter(Boolean))].sort((a, b) => a.localeCompare(b));
-    for (const c of cats) rows.push(row(c, newest.filter(f => f.category === c)));
+    for (const c of cats) rows.push(row(c, collapse(newest.filter(f => f.category === c))));
   }
   $('rows').replaceChildren(...rows);
 
-  $('grid').replaceChildren(...list.map(f => card(f)));
+  $('grid').replaceChildren(...(searching ? list : collapse(list)).map(f => card(f)));
   const none = (state.loaded && !list.length) || !!state.loadError;
   $('empty').hidden = !none;
   if (none) {
@@ -301,7 +351,16 @@ async function openPlayer(f, resumeAt) {
   dl.href = drive.isPublic ? `https://drive.google.com/uc?export=download&id=${f.id}` : `${drive.mediaUrl(f)}&download=${encodeURIComponent(f.title)}`;
   $('copy-btn').hidden = !drive.isPublic;
   $('list-btn').textContent = listLabel(f.id);
-  $('upnext').replaceChildren(...visibleFiles().filter(x => x.id !== f.id).slice(0, 12).map(x => card(x, true)));
+  // Beside the player: the rest of the series, or other videos.
+  $('upnext-title').textContent = f.series ? `${f.series}: episodes` : 'More videos';
+  $('upnext').replaceChildren(...(f.series ? episodesOf(f.series) : collapse(visibleFiles().filter(x => x.id !== f.id)).slice(0, 12)).map(x => {
+    const c = card(x, true);
+    if (x.id === f.id) c.classList.add('now');
+    return c;
+  }));
+  $('watch-series').hidden = !f.series;
+  $('watch-series').textContent = f.series ? `${f.series} · ${epLabel(f)}` : '';
+  $('watch-series').href = f.series ? seriesHref(f.series) : '#/';
   $('c-next').hidden = !nextVideo();
   $('c-quality').textContent = qualityLabel();
   stageMsg('');
@@ -343,7 +402,7 @@ function rememberPosition(force) {
   store.set('pos', pos);
 }
 
-const nextVideo = () => { const list = visibleFiles(); return list[list.findIndex(x => x.id === state.current?.id) + 1]; };
+const nextVideo = () => { const list = state.current?.series ? episodesOf(state.current.series) : visibleFiles().filter(f => !f.series); return list[list.findIndex(x => x.id === state.current?.id) + 1]; };
 const playNext = () => { cancelNext(); const n = nextVideo(); if (n) location.hash = `#/watch/${n.id}`; };
 
 // When a video ends, the next one starts after a short countdown the viewer can cancel.
@@ -653,6 +712,10 @@ function openEdit(f) {
   $('e-desc').value = f.description || '';
   $('e-cat').value = f.category || '';
   $('e-feat').checked = !!f.featured;
+  $('e-series').value = f.series || '';
+  $('e-season').value = f.series ? f.season || 1 : '';
+  $('e-episode').value = f.series ? f.episode || '' : '';
+  $('e-series-list').innerHTML = [...new Set(state.files.map(x => x.series).filter(Boolean))].map(c => `<option value="${esc(c)}">`).join('');
   $('e-cats').innerHTML = [...new Set(state.files.map(x => x.category).filter(Boolean))].map(c => `<option value="${esc(c)}">`).join('');
   paintThumb($('e-thumb-img'), f);
   renderEditSubs();
@@ -681,6 +744,13 @@ $('e-save').addEventListener('click', async () => {
     f.title = $('e-title').value.trim() || f.title;
     f.description = $('e-desc').value.trim();
     f.category = $('e-cat').value.trim();
+    f.series = $('e-series').value.trim();
+    if (f.series) {
+      f.season = Math.max(1, parseInt($('e-season').value, 10) || 1);
+      // No episode number given: it becomes the next one in that season.
+      const taken = state.files.filter(x => x !== f && x.series === f.series && (x.season || 1) === f.season).map(x => x.episode || 0);
+      f.episode = parseInt($('e-episode').value, 10) || Math.max(0, ...taken) + 1;
+    } else { delete f.season; delete f.episode; }
     if ($('e-feat').checked) state.files.forEach(x => { x.featured = false; }); // one featured video at a time
     f.featured = $('e-feat').checked;
     if (newThumb !== undefined) {
@@ -854,7 +924,7 @@ async function renderAdmin() {
     const row = document.createElement('div');
     row.className = 'admin-row';
     row.innerHTML = `<a class="thumb" href="#/watch/${f.id}"><img alt="" loading="lazy" referrerpolicy="no-referrer"></a>
-      <div class="card-text"><strong>${esc(f.title)}</strong><span>${fmtDate(f.added)} · ${fmtSize(f.size)}${f.subs?.length ? ` · ${f.subs.length} subtitle${f.subs.length > 1 ? 's' : ''}` : ''}${f.own ? '' : ' · from your Drive'}${f.category ? ` · ${esc(f.category)}` : ''}${f.featured ? ' · featured' : ''}</span>
+      <div class="card-text"><strong>${esc(f.title)}</strong><span>${fmtDate(f.added)} · ${fmtSize(f.size)}${f.subs?.length ? ` · ${f.subs.length} subtitle${f.subs.length > 1 ? 's' : ''}` : ''}${f.own ? '' : ' · from your Drive'}${f.category ? ` · ${esc(f.category)}` : ''}${f.featured ? ' · featured' : ''}${f.series ? ` · ${esc(f.series)} ${epLabel(f)}` : ''}</span>
       <span>${esc(f.description || 'No description')}</span></div>
       <div class="actions"><button class="btn small">Edit</button><button class="btn small danger">Remove</button></div>`;
     paintThumb(row.querySelector('img'), f);
@@ -874,7 +944,7 @@ async function renderAdmin() {
 
 // ---------- routing & sign-in ----------
 function show(view) {
-  for (const id of ['view-admin', 'view-library', 'view-watch']) $(id).hidden = id !== view;
+  for (const id of ['view-admin', 'view-library', 'view-series', 'view-watch']) $(id).hidden = id !== view;
 }
 
 function route() {
@@ -882,6 +952,14 @@ function route() {
   const old = /^#\/v\/([\w-]+)/.exec(location.hash)?.[1]; // links from the earlier share feature
   if (old) { location.replace(`#/watch/${old}`); return; }
   if (location.hash.startsWith('#/admin')) { closePlayer(); show('view-admin'); renderAdmin(); return; }
+  const series = /^#\/series\/(.+)/.exec(location.hash)?.[1];
+  if (series) {
+    const name = decodeURIComponent(series);
+    if (!state.loaded && !state.loadError) { renderLibrary(); return show('view-library'); }
+    if (!episodesOf(name).length) { location.hash = '#/'; return; }
+    closePlayer(); renderSeries(name); window.scrollTo(0, 0);
+    return show('view-series');
+  }
   const id = /^#\/watch\/([\w-]+)/.exec(location.hash)?.[1];
   if (!id) { closePlayer(); renderLibrary(); return show('view-library'); }
   if (state.current?.id === id) return show('view-watch');
@@ -929,7 +1007,7 @@ document.addEventListener('click', e => {
   if (!menu.hidden && !e.target.closest('#pmenu, .ctl, #video')) closeMenu();
 });
 
-$('search').addEventListener('input', e => { state.query = e.target.value.trim(); if (state.current || location.hash.startsWith('#/admin')) location.hash = '#/'; else renderLibrary(); window.scrollTo(0, 0); });
+$('search').addEventListener('input', e => { state.query = e.target.value.trim(); if (state.current || /^#\/(admin|series)/.test(location.hash)) location.hash = '#/'; else renderLibrary(); window.scrollTo(0, 0); });
 $('sort').addEventListener('change', e => { state.sort = e.target.value; renderLibrary(); });
 window.addEventListener('hashchange', route);
 

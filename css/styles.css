@@ -272,3 +272,23 @@ input.seek::-webkit-slider-thumb { background: var(--accent-2); }
 #edit label.check { display: flex; align-items: center; gap: 8px; font-weight: 500; }
 #edit input[type="text"] { height: 40px; padding: 0 12px; background: var(--bg); border: 1px solid var(--line); border-radius: 9px; width: 100%; }
 @media (max-width: 640px) { .hero { margin: -16px -14px 20px; min-height: 46vh; } .hero-text { padding: 20px 14px 24px; } }
+
+/* ---------- series ---------- */
+.thumb.stack { box-shadow: 6px -6px 0 -1px var(--panel-2), 6px -6px 0 0 var(--line), 12px -12px 0 -1px var(--panel), 12px -12px 0 0 var(--line); margin: 12px 12px 0 0; }
+.series { max-width: 900px; margin: 0 auto; }
+.series-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; flex-wrap: wrap; margin: 12px 0 26px; }
+.series-head > div { display: grid; gap: 8px; }
+.series-head h1 { font-size: clamp(28px, 4.6vw, 46px); line-height: 1.05; letter-spacing: -.03em; overflow-wrap: anywhere; }
+.series-head .btn { height: 44px; padding: 0 22px; font-size: 16px; }
+#series-list h3 { font-size: 18px; margin: 22px 0 12px; }
+#series-list .card.compact { grid-template-columns: 200px 1fr; align-items: center; padding: 10px; margin: 0 -10px 4px; border-radius: var(--radius); }
+#series-list .card.compact:hover { background: var(--panel); }
+#series-list .card.compact strong { font-size: 16px; }
+#series-list .card-text span { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.series-link { justify-self: start; color: var(--accent-2); font-weight: 650; font-size: 14px; }
+.series-link:hover { text-decoration: underline; }
+.card.now { background: var(--panel); border-radius: 8px; box-shadow: 0 0 0 6px var(--panel); }
+.card.now strong { color: var(--accent-2); }
+.e-series { display: grid; grid-template-columns: 1fr 84px 84px; gap: 10px; }
+#edit input[type="number"] { height: 40px; padding: 0 10px; background: var(--bg); border: 1px solid var(--line); border-radius: 9px; width: 100%; }
+@media (max-width: 640px) { #series-list .card.compact { grid-template-columns: 130px 1fr; } }

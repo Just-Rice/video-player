@@ -94,6 +94,15 @@
     </div>
   </section>
 
+  <!-- One series: its episodes, season by season -->
+  <section class="series" id="view-series" hidden>
+    <div class="series-head">
+      <div><span class="tag">Series</span><h1 id="series-title"></h1><p class="meta" id="series-meta"></p></div>
+      <a class="btn hero-play" id="series-play">▶ Play</a>
+    </div>
+    <div id="series-list"></div>
+  </section>
+
   <!-- Player -->
   <section class="watch" id="view-watch" hidden>
     <div class="watch-main">
@@ -145,6 +154,7 @@
       </div>
 
       <div class="watch-info">
+        <a class="series-link" id="watch-series" hidden></a>
         <h2 id="watch-title"></h2>
         <p class="meta" id="watch-meta"></p>
         <p class="desc" id="watch-desc" hidden></p>
@@ -160,7 +170,7 @@
       </div>
     </div>
     <aside class="upnext">
-      <h3>More videos</h3>
+      <h3 id="upnext-title">More videos</h3>
       <div id="upnext"></div>
     </aside>
   </section>
@@ -192,6 +202,12 @@
   <label>Description<textarea id="e-desc" rows="3"></textarea></label>
   <label>Category<input id="e-cat" type="text" list="e-cats" autocomplete="off" placeholder="e.g. Travel, Family, Music"></label>
   <datalist id="e-cats"></datalist>
+  <div class="e-series">
+    <label>Series<input id="e-series" type="text" list="e-series-list" autocomplete="off" placeholder="Leave empty for a single video"></label>
+    <label>Season<input id="e-season" type="number" min="1" step="1" placeholder="1"></label>
+    <label>Episode<input id="e-episode" type="number" min="1" step="1" placeholder="next"></label>
+  </div>
+  <datalist id="e-series-list"></datalist>
   <label class="check"><input id="e-feat" type="checkbox"> Feature this video at the top of the home page</label>
   <div class="e-thumb">
     <div class="thumb"><img id="e-thumb-img" alt=""></div>

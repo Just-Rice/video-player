@@ -10,6 +10,9 @@ Live at **https://just-rice.github.io/video-player/**
   New, and one per category, with every video's name and picture. A search bar looks through
   titles, descriptions and categories. Anyone can watch, no sign-in. Continue watching and
   My List are remembered per device.
+- **Series:** give videos the same series name, with a season and episode number, and they
+  become one card on the home page that opens an episode list by season. The player shows
+  the episode list beside the video and plays the next episode automatically.
 - **Up next:** when a video ends, the next one starts after a five-second countdown.
 - **Hidden manage page** at `/sign-in`: asks for the owner password, then the owner's Google
   sign-in. From there the owner can upload videos, add videos that are already in their
