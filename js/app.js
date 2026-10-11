@@ -151,7 +151,7 @@ function seriesCard(item) {
   a.className = 'card';
   a.href = seriesHref(item.seriesName);
   a.innerHTML = `
-    <div class="thumb stack"><img alt="" loading="lazy" referrerpolicy="no-referrer"><span class="dur">${item.episodes.length} episode${item.episodes.length > 1 ? 's' : ''}</span></div>
+    <div class="thumb stack"><img alt="" loading="lazy"><span class="dur">${item.episodes.length} episode${item.episodes.length > 1 ? 's' : ''}</span></div>
     <div class="card-text"><strong>${esc(item.seriesName)}</strong><span>Series${seasons > 1 ? ` · ${seasons} seasons` : ''}${first.category ? ` · ${esc(first.category)}` : ''}</span></div>`;
   paintThumb(a.querySelector('img'), first);
   return a;
@@ -183,7 +183,7 @@ function card(f, compact) {
   a.className = compact ? 'card compact' : 'card';
   a.href = `#/watch/${f.id}`;
   a.innerHTML = `
-    <div class="thumb"><img alt="" loading="lazy" referrerpolicy="no-referrer">
+    <div class="thumb"><img alt="" loading="lazy">
       ${dur ? `<span class="dur">${fmtTime(dur)}</span>` : ''}
       ${pct ? `<span class="seen"><i style="width:${pct}%"></i></span>` : ''}
     </div>
@@ -217,7 +217,7 @@ function renderHero(f) {
   const hero = $('hero');
   hero.hidden = !f;
   if (!f) return;
-  hero.innerHTML = `<img alt="" referrerpolicy="no-referrer"><div class="hero-text">
+  hero.innerHTML = `<img alt=""><div class="hero-text">
     ${f.category ? `<span class="tag">${esc(f.category)}</span>` : ''}
     <h1>${esc(f.title)}</h1>
     ${f.description ? `<p>${esc(f.description)}</p>` : ''}
@@ -923,7 +923,7 @@ async function renderAdmin() {
   $('admin-list').replaceChildren(...visibleFiles().map(f => {
     const row = document.createElement('div');
     row.className = 'admin-row';
-    row.innerHTML = `<a class="thumb" href="#/watch/${f.id}"><img alt="" loading="lazy" referrerpolicy="no-referrer"></a>
+    row.innerHTML = `<a class="thumb" href="#/watch/${f.id}"><img alt="" loading="lazy"></a>
       <div class="card-text"><strong>${esc(f.title)}</strong><span>${fmtDate(f.added)} · ${fmtSize(f.size)}${f.subs?.length ? ` · ${f.subs.length} subtitle${f.subs.length > 1 ? 's' : ''}` : ''}${f.own ? '' : ' · from your Drive'}${f.category ? ` · ${esc(f.category)}` : ''}${f.featured ? ' · featured' : ''}${f.series ? ` · ${esc(f.series)} ${epLabel(f)}` : ''}</span>
       <span>${esc(f.description || 'No description')}</span></div>
       <div class="actions"><button class="btn small">Edit</button><button class="btn small danger">Remove</button></div>`;

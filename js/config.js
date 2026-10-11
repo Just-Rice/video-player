@@ -15,7 +15,7 @@ export const FOLDER_NAME = 'Reelbox';
 // API_KEY is a read-only Google API key (restricted to the Drive API and this site).
 // FOLDER_ID is the ID of the owner's "Reelbox" Drive folder; the app shows it after the
 // owner's first sign-in.
-export const API_KEY = '';
+export const API_KEY = 'AIzaSyCSvPwk6mkfjMFQH53K7fADz-xIVkE86Os';
 // Google Cloud project number; the Drive file picker needs it.
 export const APP_ID = '661147755281';
 export const FOLDER_ID = '1TrZUldml5bAW4m-xXomH_dg92oAw9or4';
