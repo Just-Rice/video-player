@@ -1,7 +1,7 @@
 // Everything that talks to Google: owner sign-in, and the Drive calls for listing, uploading,
 // renaming and removing videos. Visitors read the public folder with the API key; only the
 // signed-in owner can write.
-import { CLIENT_ID, SCOPE, FOLDER_NAME, API_KEY, FOLDER_ID } from './config.js';
+import { CLIENT_ID, SCOPE, FOLDER_NAME, API_KEY, FOLDER_ID, APP_ID } from './config.js';
 
 const API = 'https://www.googleapis.com/drive/v3';
 const UPLOAD = 'https://www.googleapis.com/upload/drive/v3/files';
@@ -146,24 +146,65 @@ export async function getFolder() {
   return id;
 }
 
-// Every file in the gallery: videos, plus the subtitle files that sit beside them.
-export async function listFiles() {
-  const q = FOLDER_ID ? `'${FOLDER_ID}' in parents and trashed=false` : `trashed=false and mimeType != '${FOLDER_TYPE}'`;
-  const files = [];
-  let pageToken;
-  do {
-    const page = await api('/files', { params: {
-      q, fields: `nextPageToken,files(${FILE_FIELDS})`, orderBy: 'createdTime desc', pageSize: 200, ...(pageToken ? { pageToken } : {}),
-    } });
-    files.push(...page.files);
-    pageToken = page.nextPageToken;
-  } while (pageToken);
-  return files;
+// The gallery itself is one small file, gallery.json, in the folder: the list of videos with
+// their titles, descriptions, thumbnails and subtitles. Visitors read it; the owner rewrites it.
+let manifestId = null;
+export async function loadManifest() {
+  const empty = { version: 1, videos: [] };
+  const folder = FOLDER_ID || (isSignedIn() ? await getFolder() : null);
+  if (!folder) return empty;
+  const found = await api('/files', { params: { q: `'${folder}' in parents and name='gallery.json' and trashed=false`, fields: 'files(id)', pageSize: 1 } });
+  manifestId = found.files[0]?.id || null;
+  if (!manifestId) return empty;
+  const data = JSON.parse(await fetchText(manifestId));
+  return { ...empty, ...data, videos: data.videos || [] };
 }
 
-export const renameVideo = (id, name) => api(`/files/${id}`, { method: 'PATCH', params: { fields: FILE_FIELDS }, body: { name } });
+export async function saveManifest(data) {
+  if (!isSignedIn()) { if (token) await setToken(null); throw new AuthError('Session expired'); }
+  const json = JSON.stringify(data);
+  if (!manifestId) { manifestId = (await uploadFile(new Blob([json]), { name: 'gallery.json', type: 'application/json' })).id; return; }
+  const res = await fetch(`${UPLOAD}/${manifestId}?uploadType=media`, { method: 'PATCH', headers: { Authorization: `Bearer ${token.access_token}`, 'Content-Type': 'application/json' }, body: json });
+  if (res.status === 401) { await setToken(null); throw new AuthError('Session expired'); }
+  if (!res.ok) throw new Error(`Couldn't save the gallery (${res.status}).`);
+}
+
+export const getMeta = id => api(`/files/${id}`, { params: { fields: FILE_FIELDS } });
+// "Anyone with the link can view", for one file. Needed for videos picked from elsewhere in Drive.
+export const makePublic = id => api(`/files/${id}/permissions`, { method: 'POST', params: { fields: 'id' }, body: { role: 'reader', type: 'anyone' } });
+export const makePrivate = id => api(`/files/${id}/permissions/anyoneWithLink`, { method: 'DELETE' });
 // Moves to the Drive bin rather than deleting outright, so a mistake can be undone for 30 days.
 export const removeFile = id => api(`/files/${id}`, { method: 'PATCH', params: { fields: 'id' }, body: { trashed: true } });
+
+// Google's own file chooser. With the drive.file permission the app can only use a Drive file
+// once the owner has picked it here, so this is how existing videos join the gallery.
+export async function pickVideos() {
+  if (!API_KEY) throw new Error('Choosing from Drive needs the API key in js/config.js first.');
+  if (!isSignedIn()) { if (token) await setToken(null); throw new AuthError('Session expired'); }
+  if (!window.google?.picker) {
+    await new Promise((resolve, reject) => {
+      const s = document.createElement('script');
+      s.src = 'https://apis.google.com/js/api.js';
+      s.onload = resolve; s.onerror = () => reject(new Error("Couldn't load the Google Drive chooser."));
+      document.head.appendChild(s);
+    });
+    await new Promise(resolve => gapi.load('picker', resolve));
+  }
+  return new Promise(resolve => {
+    const view = new google.picker.DocsView(google.picker.ViewId.DOCS_VIDEOS).setIncludeFolders(true).setMode(google.picker.DocsViewMode.LIST);
+    new google.picker.PickerBuilder()
+      .addView(view).enableFeature(google.picker.Feature.MULTISELECT_ENABLED)
+      .setOAuthToken(token.access_token).setDeveloperKey(API_KEY).setAppId(APP_ID).setTitle('Choose videos for the gallery')
+      .setCallback(res => {
+        if (res.action === google.picker.Action.PICKED) resolve(res.docs.map(d => d.id));
+        else if (res.action === google.picker.Action.CANCEL) resolve([]);
+      })
+      .build().setVisible(true);
+  });
+}
+
+// Pictures (custom thumbnails) come straight from Google once the gallery is public.
+export const imageUrl = id => (API_KEY ? `${API}/files/${id}?alt=media&key=${API_KEY}` : '');
 
 // Where the <video> tag loads from. Public files come straight from Google; before the gallery
 // is public, the owner's own files go through the service worker (./stream/<id>, see sw.js).
@@ -178,7 +219,7 @@ async function mediaFetch(id) {
   if (isSignedIn()) headers.Authorization = `Bearer ${token.access_token}`;
   else if (API_KEY) url.searchParams.set('key', API_KEY);
   else throw new AuthError('Signed out');
-  const res = await fetch(url, { headers });
+  const res = await fetch(url, { headers, cache: 'no-store' });
   if (res.status === 401) { await setToken(null); throw new AuthError('Session expired'); }
   if (!res.ok) throw new Error(`Couldn't load the file (${res.status}).`);
   return res;
@@ -202,22 +243,8 @@ export async function downloadBlob(id, onProgress) {
   return new Blob(parts, { type: res.headers.get('Content-Type') || 'video/mp4' });
 }
 
-// Small files (subtitles) go up in a single request.
-export async function uploadText(name, mimeType, text) {
-  if (!isSignedIn()) { if (token) await setToken(null); throw new AuthError('Session expired'); }
-  const parent = await getFolder();
-  const b = `reelbox${Date.now()}`;
-  const body = `--${b}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify({ name, mimeType, parents: [parent] })}\r\n--${b}\r\nContent-Type: ${mimeType}; charset=UTF-8\r\n\r\n${text}\r\n--${b}--`;
-  const res = await fetch(`${UPLOAD}?uploadType=multipart&fields=${encodeURIComponent(FILE_FIELDS)}`, {
-    method: 'POST', headers: { Authorization: `Bearer ${token.access_token}`, 'Content-Type': `multipart/related; boundary=${b}` }, body,
-  });
-  if (res.status === 401) { await setToken(null); throw new AuthError('Session expired'); }
-  if (!res.ok) throw new Error(`Couldn't save the subtitles (${res.status}).`);
-  return res.json();
-}
-
 const TYPES = { mp4: 'video/mp4', m4v: 'video/mp4', mov: 'video/quicktime', webm: 'video/webm', mkv: 'video/x-matroska', avi: 'video/x-msvideo', ogv: 'video/ogg', mpg: 'video/mpeg', mpeg: 'video/mpeg', '3gp': 'video/3gpp', ts: 'video/mp2t', wmv: 'video/x-ms-wmv', flv: 'video/x-flv' };
-export const videoType = file => (file.type.startsWith('video/') ? file.type : TYPES[file.name.split('.').pop().toLowerCase()] || '');
+export const videoType = file => ((file.type || '').startsWith('video/') ? file.type : TYPES[(file.name || '').split('.').pop().toLowerCase()] || '');
 
 function putChunk(url, blob, start, total, onProgress, signal) {
   return new Promise((resolve, reject) => {
@@ -240,9 +267,8 @@ function receivedBytes(xhr, fallback) {
 }
 
 // Uploads in pieces so a dropped connection resumes instead of starting over.
-export async function uploadVideo(file, { duration, onProgress, signal } = {}) {
+export async function uploadFile(file, { name = file.name, type = videoType(file), appProperties = {}, onProgress, signal } = {}) {
   if (!isSignedIn()) { if (token) await setToken(null); throw new AuthError('Session expired'); }
-  const type = videoType(file);
   const parent = await getFolder();
   const start = await fetch(`${UPLOAD}?uploadType=resumable&fields=${encodeURIComponent(FILE_FIELDS)}`, {
     method: 'POST', signal,
@@ -252,7 +278,7 @@ export async function uploadVideo(file, { duration, onProgress, signal } = {}) {
       'X-Upload-Content-Type': type,
       'X-Upload-Content-Length': String(file.size),
     },
-    body: JSON.stringify({ name: file.name, mimeType: type, parents: [parent], appProperties: duration ? { dur: String(Math.round(duration)) } : {} }),
+    body: JSON.stringify({ name, mimeType: type, parents: [parent], appProperties }),
   });
   if (start.status === 401) { await setToken(null); throw new AuthError('Session expired'); }
   if (!start.ok) {

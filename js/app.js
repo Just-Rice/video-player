@@ -1,11 +1,11 @@
 // Screen logic: library, player, upload queue.
 import * as drive from './drive.js';
+import { ADMIN_SALT, ADMIN_HASH, API_KEY, FOLDER_ID } from './config.js';
 
 const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
-const THUMB_CACHE = 'reelbox-thumbs';
-const state = { files: [], subs: [], loaded: false, loadError: '', query: '', sort: 'recent', current: null, uploads: [], busy: false, canStream: false };
+const state = { manifest: { version: 1, videos: [] }, files: [], loaded: false, loadError: '', query: '', sort: 'recent', current: null, uploads: [], busy: false, canStream: false };
 const video = $('video');
 const stage = $('stage');
 
@@ -19,8 +19,8 @@ const store = {
 const fmtSize = b => { b = Number(b) || 0; const u = ['B', 'KB', 'MB', 'GB', 'TB']; let i = 0; while (b >= 1024 && i < 4) { b /= 1024; i++; } return `${b.toFixed(b < 10 && i ? 1 : 0)} ${u[i]}`; };
 const fmtTime = s => { s = Math.max(0, Math.floor(s || 0)); const h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60), x = String(s % 60).padStart(2, '0'); return h ? `${h}:${String(m).padStart(2, '0')}:${x}` : `${m}:${x}`; };
 const fmtDate = iso => new Date(iso).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
-const durationOf = f => (Number(f.videoMediaMetadata?.durationMillis) / 1000) || Number(f.appProperties?.dur) || 0;
-const titleOf = f => f.name.replace(/\.[a-z0-9]{2,5}$/i, '');
+const durationOf = f => Number(f.duration) || 0;
+const titleOf = f => f.title;
 
 // ---------- small UI helpers ----------
 let toastTimer;
@@ -64,11 +64,14 @@ function handleError(err) {
   toast(err.message || 'Something went wrong.');
 }
 
-// Owner-only buttons, and the quiet sign-in link visitors see instead.
+// The manage page is unlocked by the password; changing anything also needs the Google sign-in.
+let unlocked = store.get('admin', false) === ADMIN_HASH;
+const isOwner = () => unlocked && drive.isSignedIn();
+
 function paintChrome() {
-  const owner = drive.isSignedIn();
+  const owner = isOwner();
   document.querySelectorAll('[data-owner]').forEach(el => { el.hidden = !owner; });
-  $('owner-btn').hidden = owner || !drive.isPublic;
+  $('manage-link').hidden = !unlocked;
   $('search-box').hidden = !state.loaded;
 }
 
@@ -93,28 +96,32 @@ function grabFrame(file) {
   });
 }
 
-const thumbKey = id => `/reelbox-thumbs/${id}`;
-async function saveThumb(id, blob) {
-  try { await (await caches.open(THUMB_CACHE)).put(thumbKey(id), new Response(blob)); } catch { /* optional */ }
+// Shrinks a chosen picture to a sensible thumbnail size.
+async function shrinkImage(file) {
+  const bmp = await createImageBitmap(file);
+  const c = document.createElement('canvas');
+  c.width = Math.min(960, bmp.width); c.height = Math.round(c.width * bmp.height / bmp.width);
+  c.getContext('2d').drawImage(bmp, 0, 0, c.width, c.height);
+  return new Promise(resolve => c.toBlob(resolve, 'image/jpeg', 0.82));
 }
-async function paintThumb(img, file) {
-  const fallback = () => { img.onerror = null; img.hidden = true; };
-  img.onerror = () => { img.onerror = fallback; if (file.thumbnailLink && img.src !== file.thumbnailLink) img.src = file.thumbnailLink; else fallback(); };
-  try {
-    const hit = await (await caches.open(THUMB_CACHE)).match(thumbKey(file.id));
-    if (hit) { img.src = URL.createObjectURL(await hit.blob()); return; }
-  } catch { /* fall through */ }
-  if (file.thumbnailLink) img.src = file.thumbnailLink; else fallback();
+
+// A video's own picture if it has one, otherwise the one Google Drive makes for it.
+function paintThumb(img, f) {
+  const auto = `https://drive.google.com/thumbnail?id=${f.id}&sz=w640`;
+  const custom = f.thumb ? drive.imageUrl(f.thumb) : '';
+  img.hidden = false;
+  img.onerror = () => { if (custom && img.src !== auto) img.src = auto; else { img.onerror = null; img.hidden = true; } };
+  img.src = custom || auto;
 }
 
 // ---------- library ----------
 function visibleFiles() {
   const q = state.query.toLowerCase();
-  const list = state.files.filter(f => !q || f.name.toLowerCase().includes(q));
+  const list = state.files.filter(f => !q || `${f.title} ${f.description || ''}`.toLowerCase().includes(q));
   const by = {
-    recent: (a, b) => b.createdTime.localeCompare(a.createdTime),
-    oldest: (a, b) => a.createdTime.localeCompare(b.createdTime),
-    name: (a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }),
+    recent: (a, b) => b.added.localeCompare(a.added),
+    oldest: (a, b) => a.added.localeCompare(b.added),
+    name: (a, b) => a.title.localeCompare(b.title, undefined, { numeric: true }),
     size: (a, b) => Number(b.size) - Number(a.size),
   };
   return list.sort(by[state.sort]);
@@ -132,7 +139,7 @@ function card(f, compact) {
       ${dur ? `<span class="dur">${fmtTime(dur)}</span>` : ''}
       ${pct ? `<span class="seen"><i style="width:${pct}%"></i></span>` : ''}
     </div>
-    <div class="card-text"><strong>${esc(titleOf(f))}</strong><span>${fmtDate(f.createdTime)} · ${fmtSize(f.size)}</span></div>`;
+    <div class="card-text"><strong>${esc(titleOf(f))}</strong><span>${fmtDate(f.added)}</span></div>`;
   paintThumb(a.querySelector('img'), f);
   return a;
 }
@@ -146,32 +153,36 @@ function renderLibrary() {
     const searching = !!state.query && state.files.length;
     $('empty-title').textContent = state.loadError ? "Couldn't load the videos" : searching ? 'Nothing matches' : 'No videos yet';
     $('empty-text').textContent = state.loadError || (searching ? `No video has “${state.query}” in its name.`
-      : drive.isSignedIn() ? 'Drop video files anywhere on this page, or use the Upload button.' : 'Nothing has been uploaded here yet.');
-    $('empty-upload').hidden = !!searching || !drive.isSignedIn() || !!state.loadError;
+      : isOwner() ? 'Drop video files anywhere on this page, or use the Upload button.' : 'Nothing has been added here yet.');
+    $('empty-upload').hidden = !!searching || !isOwner() || !!state.loadError;
   }
   $('lib-title').textContent = state.loaded ? `Videos${state.files.length ? ` (${state.files.length})` : ''}` : state.loadError ? 'Videos' : 'Loading videos…';
 }
 
-// Subtitle files sit beside the videos, named "sub.<video id>.<label>.vtt".
-const SUB_NAME = /^sub\.([\w-]+)\.(.+)\.vtt$/;
+const saveGallery = () => drive.saveManifest(state.manifest);
+
+// What the gallery remembers about one video.
+const entryFrom = (meta, extra = {}) => ({
+  id: meta.id, title: meta.name.replace(/\.[a-z0-9]{2,5}$/i, ''), description: '', mimeType: meta.mimeType, size: Number(meta.size) || 0,
+  duration: Number(meta.videoMediaMetadata?.durationMillis) / 1000 || 0, width: meta.videoMediaMetadata?.width || 0, height: meta.videoMediaMetadata?.height || 0,
+  added: new Date().toISOString(), thumb: '', subs: [], own: false, ...extra,
+});
 
 async function refresh() {
   try {
-    let all;
-    try { all = await drive.listFiles(); } catch (err) {
+    let manifest;
+    try { manifest = await drive.loadManifest(); } catch (err) {
       if (!(err instanceof drive.AuthError) || !drive.isPublic) throw err;
-      all = await drive.listFiles(); // owner session just ran out: read as a visitor instead
+      manifest = await drive.loadManifest(); // owner session just ran out: read as a visitor instead
     }
-    state.files = all.filter(f => f.mimeType.startsWith('video/'));
-    state.subs = all.filter(f => SUB_NAME.test(f.name));
+    state.manifest = manifest; state.files = manifest.videos;
     state.loaded = true; state.loadError = '';
   } catch (err) {
     if (!(err instanceof drive.AuthError)) state.loadError = err.message;
     handleError(err);
   }
-  paintChrome();
   route();
-  if (drive.isSignedIn()) drive.getAccount().then(renderAccount).catch(handleError);
+  if (isOwner()) drive.getAccount().then(renderAccount).catch(handleError);
 }
 
 function renderAccount({ user, storageQuota }) {
@@ -227,12 +238,12 @@ async function openPlayer(f, resumeAt) {
   state.current = f;
   document.title = `${titleOf(f)} · Reelbox`;
   $('watch-title').textContent = titleOf(f);
-  const m = f.videoMediaMetadata;
-  $('watch-meta').textContent = [fmtDate(f.createdTime), fmtSize(f.size), m?.height ? `${m.width}×${m.height}` : ''].filter(Boolean).join(' · ');
+  $('watch-meta').textContent = [fmtDate(f.added), fmtSize(f.size), f.height ? `${f.width}×${f.height}` : ''].filter(Boolean).join(' · ');
+  $('watch-desc').textContent = f.description || ''; $('watch-desc').hidden = !f.description;
   $('open-drive').href = `https://drive.google.com/file/d/${f.id}/view`;
   const dl = $('download-btn');
   dl.hidden = !drive.isPublic && !state.canStream;
-  dl.href = drive.isPublic ? `https://drive.google.com/uc?export=download&id=${f.id}` : `${drive.mediaUrl(f)}&download=${encodeURIComponent(f.name)}`;
+  dl.href = drive.isPublic ? `https://drive.google.com/uc?export=download&id=${f.id}` : `${drive.mediaUrl(f)}&download=${encodeURIComponent(f.title)}`;
   $('copy-btn').hidden = !drive.isPublic;
   $('upnext').replaceChildren(...visibleFiles().filter(x => x.id !== f.id).slice(0, 12).map(x => card(x, true)));
   $('c-next').hidden = !nextVideo();
@@ -301,37 +312,38 @@ const activeSubtitle = () => [...video.textTracks].find(t => t.mode === 'showing
 
 async function loadSubtitles(f) {
   $('c-sub').classList.remove('on');
-  const mine = state.subs.map(s => ({ s, m: SUB_NAME.exec(s.name) })).filter(x => x.m[1] === f.id);
-  for (const { s, m } of mine) {
+  for (const sub of f.subs || []) {
     try {
-      const text = await drive.fetchText(s.id);
+      const text = await drive.fetchText(sub.id);
       if (state.current !== f) return;
-      addTrack(m[2], asVtt(s.name, text));
+      addTrack(sub.label, asVtt('', text));
     } catch { /* a broken subtitle file shouldn't stop the video */ }
   }
   const want = store.get('sub', '');
   if (want && [...video.textTracks].some(t => t.label === want)) showSubtitle(want);
 }
 
+let subTarget = null; // set when subtitles are being added from the details window
 $('sub-input').addEventListener('change', async e => {
   const file = e.target.files[0];
   e.target.value = '';
-  const f = state.current;
+  const f = subTarget || state.current;
+  subTarget = null;
   if (!file || !f) return;
   try {
     const vtt = asVtt(file.name, await file.text());
     const guess = /\.([a-z]{2,3}(?:-[a-z]{2})?)\.(?:srt|vtt)$/i.exec(file.name)?.[1];
     let label = guess ? guess.toUpperCase() : 'English';
-    if (drive.isSignedIn()) {
+    if (isOwner()) {
       label = await ask({ title: 'Name these subtitles', text: 'They will be saved with the video so every viewer can turn them on.', ok: 'Add subtitles', input: label });
       if (!label) return;
-      label = label.replace(/[\\/]/g, '-');
-      state.subs.push(await drive.uploadText(`sub.${f.id}.${label}.vtt`, 'text/vtt', vtt));
+      const saved = await drive.uploadFile(new Blob([vtt]), { name: `${f.title}.${label}.vtt`, type: 'text/vtt' });
+      (f.subs ||= []).push({ label, id: saved.id });
+      await saveGallery();
+      if (editing === f) { renderEditSubs(); $('edit').showModal(); }
     }
-    if (state.current !== f) return;
-    addTrack(label, vtt);
-    showSubtitle(label);
-    toast(drive.isSignedIn() ? 'Subtitles added for everyone.' : 'Subtitles loaded on this device.');
+    if (state.current === f) { addTrack(label, vtt); showSubtitle(label); }
+    toast(isOwner() ? 'Subtitles added for everyone.' : 'Subtitles loaded on this device.');
   } catch (err) { handleError(err); }
 });
 
@@ -357,7 +369,7 @@ function setSpeed(rate, quiet) {
 
 function qualityLabel() {
   if (driveMode) return 'Auto';
-  const h = state.current?.videoMediaMetadata?.height || video.videoHeight;
+  const h = state.current?.height || video.videoHeight;
   return h ? `${h}p` : 'HD';
 }
 
@@ -395,12 +407,12 @@ $('c-sub').addEventListener('click', e => {
   openMenu(e.currentTarget, 'Subtitles', [
     { label: 'Off', checked: !active, pick: () => showSubtitle('') },
     ...tracks,
-    { label: drive.isSignedIn() ? 'Add a subtitle file for everyone…' : 'Load a subtitle file…', pick: () => $('sub-input').click() },
+    { label: isOwner() ? 'Add a subtitle file for everyone…' : 'Load a subtitle file…', pick: () => { subTarget = null; $('sub-input').click(); } },
   ], tracks.length ? '' : 'This video has no subtitles yet. You can load a .srt or .vtt file.');
 });
 
 $('c-quality').addEventListener('click', e => {
-  const h = state.current?.videoMediaMetadata?.height || video.videoHeight;
+  const h = state.current?.height || video.videoHeight;
   openMenu(e.currentTarget, 'Quality', [
     { label: `Original${h ? ` (${h}p)` : ''}`, checked: !driveMode, pick: () => setDriveMode(false) },
     { label: 'Auto / lower quality', checked: driveMode, pick: () => { rememberPosition(true); setDriveMode(true); } },
@@ -537,31 +549,104 @@ $('copy-btn').addEventListener('click', () => {
   navigator.clipboard.writeText(link).then(() => toast('Link copied. Anyone can watch with it.'), () => toast(link));
 });
 
-$('rename-btn').addEventListener('click', async () => {
-  const f = state.current;
-  const ext = (/\.[a-z0-9]{2,5}$/i.exec(f.name) || [''])[0];
-  const name = await ask({ title: 'Rename video', ok: 'Rename', input: titleOf(f) });
-  if (!name || name === titleOf(f)) return;
+$('rename-btn').addEventListener('click', () => openEdit(state.current));
+$('delete-btn').addEventListener('click', () => removeVideo(state.current));
+
+// ---------- owner: details window ----------
+let editing = null;
+let newThumb; // undefined = unchanged, null = back to automatic, Blob = new picture
+
+function renderEditSubs() {
+  $('e-subs').replaceChildren(...(editing.subs || []).map(sub => {
+    const li = document.createElement('li');
+    li.innerHTML = `<span>${esc(sub.label)}</span><button class="btn small danger" type="button">Remove</button>`;
+    li.querySelector('button').addEventListener('click', async () => {
+      try {
+        editing.subs = editing.subs.filter(x => x !== sub);
+        await saveGallery();
+        drive.removeFile(sub.id).catch(() => {});
+        renderEditSubs();
+      } catch (err) { handleError(err); }
+    });
+    return li;
+  }));
+}
+
+function openEdit(f) {
+  editing = f; newThumb = undefined;
+  $('e-title').value = f.title;
+  $('e-desc').value = f.description || '';
+  paintThumb($('e-thumb-img'), f);
+  renderEditSubs();
+  $('edit').showModal();
+}
+
+$('e-thumb-pick').addEventListener('click', () => $('thumb-input').click());
+$('thumb-input').addEventListener('change', async e => {
+  const file = e.target.files[0];
+  e.target.value = '';
+  if (!file) return;
   try {
-    Object.assign(f, await drive.renameVideo(f.id, name + ext));
-    $('watch-title').textContent = titleOf(f);
-    document.title = `${titleOf(f)} · Reelbox`;
+    newThumb = await shrinkImage(file);
+    const img = $('e-thumb-img');
+    img.onerror = null; img.hidden = false; img.src = URL.createObjectURL(newThumb);
+  } catch { toast("That picture couldn't be read."); }
+});
+$('e-thumb-auto').addEventListener('click', () => { newThumb = null; paintThumb($('e-thumb-img'), { id: editing.id }); });
+$('e-sub-add').addEventListener('click', () => { subTarget = editing; $('edit').close(); $('sub-input').click(); });
+$('e-cancel').addEventListener('click', () => $('edit').close());
+$('edit').addEventListener('close', () => { if (!subTarget) editing = null; });
+$('e-save').addEventListener('click', async () => {
+  const f = editing;
+  $('e-save').disabled = true;
+  try {
+    f.title = $('e-title').value.trim() || f.title;
+    f.description = $('e-desc').value.trim();
+    if (newThumb !== undefined) {
+      const old = f.thumb;
+      f.thumb = newThumb ? (await drive.uploadFile(newThumb, { name: `thumb-${f.id}.jpg`, type: 'image/jpeg' })).id : '';
+      if (old) drive.removeFile(old).catch(() => {});
+    }
+    await saveGallery();
+    $('edit').close();
+    if (state.current === f) { $('watch-title').textContent = f.title; $('watch-desc').textContent = f.description; $('watch-desc').hidden = !f.description; document.title = `${f.title} · Reelbox`; }
+    else route();
+    toast('Saved.');
   } catch (err) { handleError(err); }
+  $('e-save').disabled = false;
 });
 
-$('delete-btn').addEventListener('click', async () => {
-  const f = state.current;
-  if (!await ask({ title: 'Delete this video?', text: `“${titleOf(f)}” will disappear from the gallery for everyone and move to your Google Drive bin, where it stays for 30 days before it's gone for good.`, ok: 'Delete', danger: true })) return;
+async function removeVideo(f) {
+  const text = f.own
+    ? `“${f.title}” will disappear from the gallery and move to your Google Drive bin, where it stays for 30 days.`
+    : `“${f.title}” will disappear from the gallery and stop being public. The file itself stays in your Google Drive.`;
+  if (!await ask({ title: 'Remove this video?', text, ok: 'Remove', danger: true })) return;
   try {
-    await drive.removeFile(f.id);
-    const subs = state.subs.filter(s => SUB_NAME.exec(s.name)[1] === f.id);
-    await Promise.all(subs.map(s => drive.removeFile(s.id).catch(() => {})));
-    state.files = state.files.filter(x => x.id !== f.id);
-    state.subs = state.subs.filter(s => !subs.includes(s));
-    location.hash = '#/';
-    toast('Moved to your Drive bin.');
+    state.manifest.videos = state.files = state.files.filter(x => x !== f);
+    await saveGallery();
+    (f.own ? drive.removeFile(f.id) : drive.makePrivate(f.id)).catch(() => {});
+    [f.thumb, ...(f.subs || []).map(x => x.id)].filter(Boolean).forEach(id => drive.removeFile(id).catch(() => {}));
+    if (state.current === f) location.hash = '#/'; else route();
+    toast('Removed from the gallery.');
   } catch (err) { handleError(err); }
-});
+}
+
+async function addFromDrive() {
+  try {
+    const ids = await drive.pickVideos();
+    let added = 0;
+    for (const id of ids) {
+      if (state.files.some(f => f.id === id)) continue;
+      const meta = await drive.getMeta(id);
+      if (!meta.mimeType.startsWith('video/')) continue;
+      await drive.makePublic(id);
+      state.files.unshift(entryFrom(meta));
+      added++;
+    }
+    if (added) { await saveGallery(); route(); }
+    if (ids.length) toast(added ? `Added ${added} video${added > 1 ? 's' : ''}. Open Edit to set the title and thumbnail.` : 'Nothing new to add.');
+  } catch (err) { handleError(err); }
+}
 
 // ---------- uploads (owner only) ----------
 function renderQueue() {
@@ -573,7 +658,7 @@ function renderQueue() {
     const li = document.createElement('li');
     li.className = u.status;
     const pct = u.file.size ? Math.round(u.sent / u.file.size * 100) : 0;
-    const line = { waiting: 'Waiting…', uploading: `${pct}% · ${fmtSize(u.sent)} of ${fmtSize(u.file.size)}`, done: 'Saved, and now public in the gallery', error: u.error || 'Failed', cancelled: 'Cancelled' }[u.status];
+    const line = { waiting: 'Waiting…', uploading: `${pct}% · ${fmtSize(u.sent)} of ${fmtSize(u.file.size)}`, done: 'Added to the gallery', error: u.error || 'Failed', cancelled: 'Cancelled' }[u.status];
     li.innerHTML = `<div class="q-row"><span class="q-name">${esc(u.file.name)}</span>
       ${u.status === 'waiting' || u.status === 'uploading' ? '<button class="q-x" aria-label="Cancel upload">×</button>' : u.status === 'error' ? '<button class="q-retry">Retry</button>' : ''}</div>
       <div class="q-bar"><i style="width:${u.status === 'done' ? 100 : pct}%"></i></div><span class="q-line">${esc(line)}</span>`;
@@ -597,20 +682,22 @@ async function pump() {
   if (state.busy) return;
   state.busy = true;
   let u;
-  while (drive.isSignedIn() && (u = state.uploads.find(x => x.status === 'waiting'))) {
+  while (isOwner() && (u = state.uploads.find(x => x.status === 'waiting'))) {
     u.status = 'uploading';
     renderQueue();
     try {
       const frame = await grabFrame(u.file);
       let painted = 0;
-      const saved = await drive.uploadVideo(u.file, {
-        duration: frame.duration, signal: u.abort.signal,
+      const saved = await drive.uploadFile(u.file, {
+        signal: u.abort.signal,
         onProgress: sent => { u.sent = sent; if (Date.now() - painted > 250) { painted = Date.now(); renderQueue(); } },
       });
-      if (frame.blob) await saveThumb(saved.id, frame.blob);
+      let thumb = '';
+      if (frame.blob) thumb = (await drive.uploadFile(frame.blob, { name: `thumb-${saved.id}.jpg`, type: 'image/jpeg' }).catch(() => null))?.id || '';
+      state.files.unshift(entryFrom(saved, { own: true, thumb, duration: frame.duration || 0 }));
+      await saveGallery();
       u.status = 'done';
-      state.files.unshift(saved);
-      if (!state.current) renderLibrary();
+      if (!state.current) route();
     } catch (err) {
       if (err.name === 'AbortError') u.status = 'cancelled';
       else if (err instanceof drive.AuthError) { u.status = 'waiting'; u.sent = 0; } // resumes after signing in again
@@ -629,30 +716,91 @@ $('queue-close').addEventListener('click', () => { state.uploads = state.uploads
 
 let dragDepth = 0;
 const hasFiles = e => [...(e.dataTransfer?.types || [])].includes('Files');
-window.addEventListener('dragenter', e => { if (hasFiles(e) && drive.isSignedIn()) { dragDepth++; $('drop').hidden = false; } });
+window.addEventListener('dragenter', e => { if (hasFiles(e) && isOwner()) { dragDepth++; $('drop').hidden = false; } });
 window.addEventListener('dragleave', () => { if (dragDepth && !--dragDepth) $('drop').hidden = true; });
 window.addEventListener('dragover', e => { if (hasFiles(e)) e.preventDefault(); });
 window.addEventListener('drop', e => {
   if (!hasFiles(e)) return;
   e.preventDefault();
   dragDepth = 0; $('drop').hidden = true;
-  if (drive.isSignedIn()) addFiles(e.dataTransfer.files);
+  if (isOwner()) addFiles(e.dataTransfer.files);
 });
 
 window.addEventListener('beforeunload', e => { if (state.uploads.some(u => u.status === 'uploading' || u.status === 'waiting')) e.preventDefault(); });
 window.addEventListener('pagehide', () => rememberPosition(true));
 
+// ---------- manage page ----------
+async function checkPassword(pw) {
+  const enc = t => new TextEncoder().encode(t);
+  const key = await crypto.subtle.importKey('raw', enc(pw), 'PBKDF2', false, ['deriveBits']);
+  const bits = await crypto.subtle.deriveBits({ name: 'PBKDF2', hash: 'SHA-256', salt: enc(ADMIN_SALT), iterations: 200000 }, key, 256);
+  return [...new Uint8Array(bits)].map(b => b.toString(16).padStart(2, '0')).join('') === ADMIN_HASH;
+}
+
+$('gate').addEventListener('submit', async e => {
+  e.preventDefault();
+  const ok = await checkPassword($('gate-pw').value).catch(() => false);
+  $('gate-pw').value = '';
+  $('gate-error').textContent = 'That password is not right.'; $('gate-error').hidden = ok;
+  if (!ok) return;
+  unlocked = true; store.set('admin', ADMIN_HASH);
+  route();
+  if (drive.isSignedIn()) refresh();
+});
+
+async function lock() {
+  unlocked = false; store.set('admin', false);
+  state.uploads.forEach(u => u.abort.abort());
+  state.uploads = []; renderQueue();
+  $('account-menu').hidden = true; $('notice').hidden = true;
+  await drive.signOut();
+  location.hash = '#/';
+  route();
+}
+$('lock-btn').addEventListener('click', lock);
+$('lock-btn-2').addEventListener('click', lock);
+$('signout-btn').addEventListener('click', lock);
+$('admin-upload').addEventListener('click', () => $('file-input').click());
+$('admin-pick').addEventListener('click', addFromDrive);
+
+async function renderAdmin() {
+  $('gate').hidden = unlocked;
+  $('gate-google').hidden = !unlocked || drive.isSignedIn();
+  $('admin-panel').hidden = !isOwner();
+  if (!unlocked) { $('gate-pw').focus(); return; }
+  if (!isOwner()) return;
+  $('admin-list').replaceChildren(...visibleFiles().map(f => {
+    const row = document.createElement('div');
+    row.className = 'admin-row';
+    row.innerHTML = `<a class="thumb" href="#/watch/${f.id}"><img alt="" loading="lazy" referrerpolicy="no-referrer"></a>
+      <div class="card-text"><strong>${esc(f.title)}</strong><span>${fmtDate(f.added)} · ${fmtSize(f.size)}${f.subs?.length ? ` · ${f.subs.length} subtitle${f.subs.length > 1 ? 's' : ''}` : ''}${f.own ? '' : ' · from your Drive'}</span>
+      <span>${esc(f.description || 'No description')}</span></div>
+      <div class="actions"><button class="btn small">Edit</button><button class="btn small danger">Remove</button></div>`;
+    paintThumb(row.querySelector('img'), f);
+    const [edit, remove] = row.querySelectorAll('button');
+    edit.addEventListener('click', () => openEdit(f));
+    remove.addEventListener('click', () => removeVideo(f));
+    return row;
+  }));
+  $('admin-empty').hidden = !!state.files.length;
+  // Until the public key and folder ID are in js/config.js, visitors can't see the gallery.
+  const steps = [];
+  if (!FOLDER_ID) steps.push(`Folder ID: <code>${esc(await drive.getFolder().catch(() => 'not ready yet'))}</code>`);
+  if (!API_KEY) steps.push('The public read-only key has not been added yet.');
+  $('setup').innerHTML = steps.length ? `<strong>Setup not finished: visitors can't see the gallery yet.</strong><br>${steps.join('<br>')}` : '';
+  $('setup').hidden = !steps.length;
+}
+
 // ---------- routing & sign-in ----------
 function show(view) {
-  for (const id of ['view-welcome', 'view-library', 'view-watch']) $(id).hidden = id !== view;
+  for (const id of ['view-admin', 'view-library', 'view-watch']) $(id).hidden = id !== view;
 }
 
 function route() {
   paintChrome();
   const old = /^#\/v\/([\w-]+)/.exec(location.hash)?.[1]; // links from the earlier share feature
   if (old) { location.replace(`#/watch/${old}`); return; }
-  // Before the gallery is public there is nothing a visitor can see.
-  if (!drive.isPublic && !drive.isSignedIn() && !state.loaded) { closePlayer(); return show('view-welcome'); }
+  if (location.hash.startsWith('#/admin')) { closePlayer(); show('view-admin'); renderAdmin(); return; }
   const id = /^#\/watch\/([\w-]+)/.exec(location.hash)?.[1];
   if (!id) { closePlayer(); renderLibrary(); return show('view-library'); }
   if (state.current?.id === id) return show('view-watch');
@@ -674,43 +822,20 @@ async function connect() {
   }
 }
 
-// First sign-in before the gallery is public: make the folder and show its ID for js/config.js.
-async function finishSetup() {
-  try {
-    const id = await drive.getFolder();
-    showNotice(`One-time setup: your Drive folder is ready. Folder ID: ${id}`, 'Copy ID',
-      () => navigator.clipboard.writeText(id).then(() => toast('Folder ID copied.'), () => {}));
-  } catch (err) { handleError(err); }
-}
-
 drive.onAuthChange(async signedIn => {
-  paintChrome();
   if (signedIn) {
     $('notice').hidden = true;
     await refresh();
-    if (!drive.isPublic) finishSetup();
     pump();
     return;
   }
-  const waiting = state.uploads.some(u => u.status === 'waiting');
-  if (waiting || (state.loaded && !drive.isPublic)) {
-    showNotice(waiting ? 'Your sign-in ran out (Google allows an hour at a time). Sign in again to finish the uploads.' : 'Your sign-in ran out. Sign in again to carry on.', 'Sign in', connect);
-  } else if (!drive.isPublic) {
-    route();
+  if (state.uploads.some(u => u.status === 'waiting')) {
+    showNotice('Your Google sign-in ran out (it lasts an hour). Sign in again to finish the uploads.', 'Sign in', connect);
   }
-  if (!state.current) renderLibrary();
+  route();
 });
 
 $('signin-btn').addEventListener('click', connect);
-$('owner-btn').addEventListener('click', connect);
-$('signout-btn').addEventListener('click', async () => {
-  state.uploads.forEach(u => u.abort.abort());
-  state.uploads = [];
-  renderQueue();
-  $('account-menu').hidden = true; $('notice').hidden = true;
-  if (!drive.isPublic) { closePlayer(); Object.assign(state, { files: [], subs: [], loaded: false, query: '' }); location.hash = '#/'; }
-  await drive.signOut();
-});
 
 $('account-btn').addEventListener('click', e => {
   e.stopPropagation();
@@ -745,8 +870,7 @@ async function startWorker() {
 
 (async function start() {
   applyPrefs();
-  const [signedIn] = await Promise.all([drive.initAuth(), startWorker()]);
+  await Promise.all([drive.initAuth(), startWorker()]);
   route();
-  if (drive.isPublic || signedIn) await refresh();
-  if (signedIn && !drive.isPublic) finishSetup();
+  await refresh();
 })();

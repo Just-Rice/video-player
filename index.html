@@ -21,7 +21,7 @@
     <input id="search" type="search" placeholder="Search videos" autocomplete="off">
   </label>
   <div class="bar-right">
-    <button class="btn ghost" id="owner-btn" hidden>Owner sign-in</button>
+    <a class="btn ghost" id="manage-link" href="#/admin" hidden>Manage</a>
     <button class="btn primary" id="upload-btn" data-owner hidden>
       <svg viewBox="0 0 20 20" width="16" height="16" aria-hidden="true"><path d="M10 14V4m0 0L6 8m4-4 4 4M4 16h12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
       <span>Upload</span>
@@ -41,15 +41,35 @@
 <div class="notice" id="notice" hidden><span id="notice-text"></span><button class="btn small" id="notice-btn"></button></div>
 
 <main>
-  <!-- Shown only until the gallery has been set up -->
-  <section class="welcome" id="view-welcome" hidden>
-    <h1>This gallery is <em>being set up</em>.</h1>
-    <p>Once the owner has finished, every video they upload will be watchable here by anyone, with no sign-in. If this is your gallery, sign in to add videos.</p>
-    <button class="btn google" id="signin-btn">
-      <svg viewBox="0 0 48 48" width="20" height="20" aria-hidden="true"><path fill="#EA4335" d="M24 9.5c3.5 0 6.6 1.2 9.1 3.6l6.8-6.8C35.8 2.4 30.3 0 24 0 14.6 0 6.5 5.4 2.600 13.200l7.900 6.200C12.400 13.600 17.700 9.500 24 9.500z"/><path fill="#4285F4" d="M46.500 24.500c0-1.600-.1-3.100-.4-4.500H24v9h12.700c-.6 3-2.300 5.500-4.800 7.200l7.700 6c4.500-4.200 6.900-10.300 6.900-17.700z"/><path fill="#FBBC05" d="M10.500 28.600A14.500 14.500 0 0 1 9.500 24c0-1.600.3-3.200.8-4.600l-7.900-6.200A24 24 0 0 0 0 24c0 3.900.9 7.500 2.600 10.800l7.900-6.200z"/><path fill="#34A853" d="M24 48c6.500 0 11.900-2.100 15.900-5.800l-7.700-6c-2.200 1.500-5 2.300-8.200 2.300-6.300 0-11.600-4.200-13.500-9.900l-7.900 6.200C6.500 42.600 14.600 48 24 48z"/></svg>
-      Owner sign-in with Google
-    </button>
-    <p class="error" id="signin-error" role="alert" hidden></p>
+  <!-- Hidden manage page, reached at /sign-in -->
+  <section class="admin" id="view-admin" hidden>
+    <form class="gate" id="gate" hidden>
+      <h2>Manage this gallery</h2>
+      <p>Enter the owner password.</p>
+      <input id="gate-pw" type="password" autocomplete="current-password" placeholder="Password" required>
+      <button class="btn primary">Unlock</button>
+      <p class="error" id="gate-error" role="alert" hidden></p>
+    </form>
+    <div class="gate" id="gate-google" hidden>
+      <h2>One more step</h2>
+      <p>Sign in with the Google account that owns the videos. Google asks for this again after an hour.</p>
+      <button class="btn google" id="signin-btn">Sign in with Google</button>
+      <p class="error" id="signin-error" role="alert" hidden></p>
+      <button class="btn ghost" id="lock-btn-2">Lock this page</button>
+    </div>
+    <div id="admin-panel" hidden>
+      <div class="lib-head">
+        <h2>Manage videos</h2>
+        <div class="actions">
+          <button class="btn primary" id="admin-upload">Upload videos</button>
+          <button class="btn" id="admin-pick">Add from Google Drive</button>
+          <button class="btn ghost" id="lock-btn">Lock</button>
+        </div>
+      </div>
+      <div class="setup" id="setup" hidden></div>
+      <div id="admin-list"></div>
+      <p class="meta" id="admin-empty" hidden>No videos in the gallery yet. Upload some, or add ones already in your Google Drive.</p>
+    </div>
   </section>
 
   <!-- Library -->
@@ -120,12 +140,13 @@
       <div class="watch-info">
         <h2 id="watch-title"></h2>
         <p class="meta" id="watch-meta"></p>
+        <p class="desc" id="watch-desc" hidden></p>
         <div class="actions">
           <button class="btn" id="copy-btn">Copy link</button>
           <a class="btn" id="download-btn" target="_blank" rel="noopener">Download</a>
-          <button class="btn" id="rename-btn" data-owner hidden>Rename</button>
+          <button class="btn" id="rename-btn" data-owner hidden>Edit details</button>
           <a class="btn" id="open-drive" target="_blank" rel="noopener" data-owner hidden>Open in Drive</a>
-          <button class="btn danger" id="delete-btn" data-owner hidden>Delete</button>
+          <button class="btn danger" id="delete-btn" data-owner hidden>Remove</button>
         </div>
         <p class="keys">Shortcuts: <kbd>Space</kbd> play/pause · <kbd>←</kbd><kbd>→</kbd> 5 s · <kbd>J</kbd><kbd>L</kbd> 10 s · <kbd>↑</kbd><kbd>↓</kbd> volume · <kbd>M</kbd> mute · <kbd>C</kbd> subtitles · <kbd>F</kbd> full screen · <kbd>P</kbd> picture in picture · <kbd>&lt;</kbd><kbd>&gt;</kbd> speed · <kbd>0</kbd>–<kbd>9</kbd> jump</p>
       </div>
@@ -157,6 +178,26 @@
   </form>
 </dialog>
 
+<dialog id="edit">
+  <h3>Video details</h3>
+  <label>Title<input id="e-title" type="text" autocomplete="off"></label>
+  <label>Description<textarea id="e-desc" rows="3"></textarea></label>
+  <div class="e-thumb">
+    <div class="thumb"><img id="e-thumb-img" alt=""></div>
+    <div>
+      <strong>Thumbnail</strong>
+      <button class="btn small" id="e-thumb-pick" type="button">Choose a picture</button>
+      <button class="btn small" id="e-thumb-auto" type="button">Use automatic</button>
+    </div>
+  </div>
+  <div><strong>Subtitles</strong><ul id="e-subs"></ul><button class="btn small" id="e-sub-add" type="button">Add a subtitle file</button></div>
+  <div class="dialog-actions">
+    <button class="btn" id="e-cancel" type="button">Cancel</button>
+    <button class="btn primary" id="e-save" type="button">Save</button>
+  </div>
+</dialog>
+
+<input id="thumb-input" type="file" accept="image/*" hidden>
 <input id="file-input" type="file" accept="video/*,.mkv,.avi,.mov,.m4v,.webm" multiple hidden>
 <input id="sub-input" type="file" accept=".vtt,.srt,text/vtt" hidden>
 <div class="toast" id="toast" role="status" hidden></div>
